@@ -50,31 +50,15 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.pdb
 ```
 
-Dalamud 的开发插件支持由 `%APPDATA%\XIVLauncherCN\dalamudConfig.json`（国际服启动器为
-`%APPDATA%\XIVLauncher\dalamudConfig.json`）驱动。两个条目很关键：
+### 在游戏中启用
 
-- `DevMode` 必须为 `true`。
-- `DevPluginLoadLocations` 是一个 `{ "Path": "<dll 的绝对路径>", "IsEnabled": true, "Nickname": null }` 列表。
-  添加一条 `Path` 指向你构建出的 `DalamudMCP.dll` 的条目即可。正常工作的安装中已有条目正是这个形状，
-  所以再加一条就足以注册插件。
+1. 启动游戏，在聊天框输入 `/xlsettings`（或在 Dalamud 控制台输入 `xlsettings`）打开 Dalamud 设置。
+    * 在其中进入 `Experimental`（实验性功能），将上面构建输出中 `DalamudMCP.dll` 的完整路径添加到 Dev Plugin Locations（开发插件位置）列表。
+2. 接着用 `/xlplugins`（聊天框）或 `xlplugins`（控制台）打开插件安装器。
+    * 在其中进入 `Dev Tools > Installed Dev Plugins`（开发工具 > 已安装的开发插件），应该能看到 `DalamudMCP`，启用它。
+3. 加载后，插件会自动启动监听器（`Enabled` 和 `AutoStart` 默认均为 true），可用 `/dalamudmcp status` 检查。
 
-相关的 `DevPluginSettings` 字典以同一绝对 DLL 路径为键，携带每个插件的标志（`StartOnBoot`、
-`NotifyForErrors`、`AutomaticReloading`、`WorkingPluginId`、`DismissedValidationProblems`）。这里说明其形状
-仅供参考；插件不要求你手工编写它。
-
-以这种方式注册的插件不需要单独的 `devPlugins` 文件夹 —— `DevPluginLoadLocations` 中的路径会被直接加载。
-编辑 `dalamudConfig.json` 时游戏必须不在运行，因为 Dalamud 在退出时会重写该文件并覆盖你的修改。路径条目
-示例：
-
-```json
-{
-  "Path": "C:\\path\\to\\Dalamud-MCP\\src\\DalamudMCP\\bin\\x64\\Debug\\DalamudMCP.dll",
-  "IsEnabled": true,
-  "Nickname": null
-}
-```
-
-加载后，插件会自动启动监听器（`Enabled` 和 `AutoStart` 默认均为 true），可用 `/dalamudmcp status` 检查。
+注意第 1 步只需执行一次；之后无需重复添加。你可以随时在插件安装器中禁用、启用插件，或设置随游戏启动自动加载。
 
 ## 验证它可用
 

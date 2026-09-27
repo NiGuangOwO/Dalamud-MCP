@@ -55,32 +55,15 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.pdb
 ```
 
-Dalamud's dev-plugin support is driven by `%APPDATA%\XIVLauncherCN\dalamudConfig.json` (or
-`%APPDATA%\XIVLauncher\dalamudConfig.json` for the global launcher). Two entries matter:
+### Activating in-game
 
-- `DevMode` must be `true`.
-- `DevPluginLoadLocations` is a list of `{ "Path": "<absolute path to the .dll>", "IsEnabled": true, "Nickname": null }`.
-  Add one entry whose `Path` points at your built `DalamudMCP.dll`. Existing entries in a working install use
-  exactly this shape, so one more is enough to register the plugin.
+1. Launch the game and use `/xlsettings` in chat or `xlsettings` in the Dalamud Console to open up the Dalamud settings.
+    * In here, go to `Experimental`, and add the full path to `DalamudMCP.dll` from the build output above to the list of Dev Plugin Locations.
+2. Next, use `/xlplugins` (chat) or `xlplugins` (console) to open up the Plugin Installer.
+    * In here, go to `Dev Tools > Installed Dev Plugins`, and the `DalamudMCP` should be visible. Enable it.
+3. Once loaded, the plugin starts the listener automatically (`Enabled` and `AutoStart` both default to true) and you can check it with `/dalamudmcp status`.
 
-The related `DevPluginSettings` dictionary is keyed by the same absolute DLL path and carries per-plugin flags
-(`StartOnBoot`, `NotifyForErrors`, `AutomaticReloading`, `WorkingPluginId`, `DismissedValidationProblems`).
-Its shape is documented here for reference; the plugin does not require you to author it by hand.
-
-A plugin registered this way needs no separate `devPlugins` folder — the path in `DevPluginLoadLocations`
-is loaded directly. The game must not be running while you edit `dalamudConfig.json`, since Dalamud rewrites
-that file on exit and would overwrite your change. Example location entry:
-
-```json
-{
-  "Path": "C:\\path\\to\\Dalamud-MCP\\src\\DalamudMCP\\bin\\x64\\Debug\\DalamudMCP.dll",
-  "IsEnabled": true,
-  "Nickname": null
-}
-```
-
-Once loaded, the plugin starts the listener automatically (`Enabled` and `AutoStart` both default to true)
-and you can check it with `/dalamudmcp status`.
+Note that you only need to add it to the Dev Plugin Locations once (Step 1); it is preserved afterwards. You can disable, enable, or load your plugin on startup through the Plugin Installer.
 
 ## Verify it works
 
