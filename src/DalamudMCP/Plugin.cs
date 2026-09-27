@@ -69,7 +69,8 @@ public sealed class Plugin : IDalamudPlugin
         ISeStringEvaluator seStringEvaluator,
         IGameInventory gameInventory,
         IAetheryteList aetheryteList,
-        ISigScanner sigScanner)
+        ISigScanner sigScanner,
+        IGameInteropProvider interop)
     {
         this.pluginInterface = pluginInterface;
         this.log = log;
@@ -106,6 +107,7 @@ public sealed class Plugin : IDalamudPlugin
             GameInventory = gameInventory,
             AetheryteList = aetheryteList,
             SigScanner = sigScanner,
+            Interop = interop,
             Config = Config,
         };
 
@@ -116,6 +118,7 @@ public sealed class Plugin : IDalamudPlugin
         MemoryTools.Register(registry, services);
         StructTools.Register(registry, services);
         UiTools.Register(registry, services);
+        CallbackProbe.Initialize(interop, sigScanner);
 
         configWindow = new ConfigWindow(this);
         windowSystem.AddWindow(configWindow);

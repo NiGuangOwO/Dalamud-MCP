@@ -238,6 +238,39 @@ internal static class UiTools
             "Read-only.",
             Json.Schema(),
             _ => AtkEventProbe.Dump());
+
+        // FireCallback probe (modelled on SimpleTweaks' Addon Logging → Callbacks): a
+        // global inline detour recording every addon callback with its decoded AtkValue[]
+        // arguments. This captures the semantic layer real UI clicks funnel into.
+        registry.Add(
+            "probe_callback_enable",
+            "Hook the global FireCallback (diagnostic)",
+            "Temporary diagnostic: installs a global hook on AtkUnitBase.FireCallback so every " +
+            "addon callback the game performs is recorded with its decoded AtkValue[] " +
+            "arguments — the same data SimpleTweaks' Addon Logging → Callbacks shows. Real UI " +
+            "interactions (button clicks, list picks) funnel into these callbacks, so the " +
+            "capture tells an agent exactly which (addon, values) payload reproduces an " +
+            "action. Use probe_callback_dump to read captures. Mutating.",
+            Json.Schema(),
+            _ => CallbackProbe.Enable(),
+            mutating: true);
+
+        registry.Add(
+            "probe_callback_disable",
+            "Unhook the FireCallback probe (diagnostic)",
+            "Removes the global FireCallback hook installed by probe_callback_enable. Mutating.",
+            Json.Schema(),
+            _ => CallbackProbe.Disable(),
+            mutating: true);
+
+        registry.Add(
+            "probe_callback_dump",
+            "Dump captured FireCallback calls (diagnostic)",
+            "Returns every addon callback captured since probe_callback_enable: addon name, " +
+            "value count, each AtkValue decoded by type (Int/UInt/Bool/String/...), the " +
+            "close/update-visibility flag, and the return value. Read-only.",
+            Json.Schema(),
+            _ => CallbackProbe.Dump());
     }
 
     private static unsafe object ProbeEnable(JObject args)

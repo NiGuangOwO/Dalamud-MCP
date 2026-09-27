@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using Dalamud.Game.ClientState;
 using Dalamud.Plugin.Services;
+using Dalamud.Utility.Signatures;
 using Lumina.Excel;
 
 namespace DalamudMCP;
@@ -33,6 +34,7 @@ public sealed class GameServices
     public required IGameInventory GameInventory { get; init; }
     public required IAetheryteList AetheryteList { get; init; }
     public required ISigScanner SigScanner { get; init; }
+    public required IGameInteropProvider Interop { get; init; }
 
     public Configuration Config { get; init; } = new();
 

@@ -120,7 +120,7 @@ internal static class Program
         if (ctors.Length != 1) return 1;
 
         var parameters = ctors[0].GetParameters();
-        Check("constructor takes 20 services", parameters.Length == 20, $"found {parameters.Length}");
+        Check("constructor takes 21 services", parameters.Length == 21, $"found {parameters.Length}");
 
         var nonInterfaces = parameters.Where(p => !p.ParameterType.IsInterface).Select(p => p.ParameterType.Name).ToArray();
         Check("every constructor parameter is an interface", nonInterfaces.Length == 0, string.Join(", ", nonInterfaces));
@@ -157,7 +157,7 @@ internal static class Program
         // Turned on BEFORE the plugin is constructed, so the live protocol checks below also
         // prove that Plugin.StartServer forwards this setting to the server it builds.
         Set(config, "LogRequests", true);
-        // Mutating tools on, so tools/list exposes the full 42-tool set over the real socket and
+        // Mutating tools on, so tools/list exposes the full 45-tool set over the real socket and
         // the sweep can exercise open_addon/close_addon/click_addon_element's argument validation.
         Set(config, "AllowMutatingTools", true);
 
@@ -337,7 +337,7 @@ internal static class Program
             ? new List<string>()
             : tools.Cast<object>().Select(t => Prop(t, "Name") as string ?? string.Empty).ToList();
 
-        Check("all 42 tools were registered", toolNames.Count == 42, $"found {toolNames.Count}");
+        Check("all 45 tools were registered", toolNames.Count == 45, $"found {toolNames.Count}");
         Check("tool names are unique", toolNames.Distinct(StringComparer.Ordinal).Count() == toolNames.Count);
         Check("registry exposes get_conditions", toolNames.Contains("get_conditions"));
         Check("registry exposes read_memory", toolNames.Contains("read_memory"));
@@ -380,7 +380,7 @@ internal static class Program
 
             var listText = await CallAsync(http, baseUrl, sessionId, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}").ConfigureAwait(false);
             var listed = CountToolEntries(listText);
-            Check("tools/list returns 42 tools over the real socket", listed == 42, $"found {listed}");
+            Check("tools/list returns 45 tools over the real socket", listed == 45, $"found {listed}");
 
             var callText = await CallAsync(
                 http, baseUrl, sessionId,
@@ -864,7 +864,7 @@ internal static class Program
             && statusLine.Contains(port.ToString(), StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
         Check("the status subcommand reports the tool count",
-            statusLine is not null && statusLine.Contains("42 tools", StringComparison.Ordinal),
+            statusLine is not null && statusLine.Contains("45 tools", StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
 
         // 'stop' followed by 'start' must take the port down and bring it back - the two paths a

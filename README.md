@@ -7,7 +7,7 @@ server on a loopback port, so an AI agent can read live game state from a runnin
 inside the game process, so it can read the same memory the client itself uses: the object table, the local
 player, party and alliance, targets, FATEs, currency, Excel game data, and arbitrary validated raw memory
 through [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs). An MCP client connects to
-`http://127.0.0.1:18777/mcp` and calls 42 tools — 33 read-only plus 9 UI tools (opt-in, mutating) that can
+`http://127.0.0.1:18777/mcp` and calls 45 tools — 33 read-only plus 12 UI/diagnostic tools (opt-in, mutating) that can
 open and close in-game addon windows. The 33 read-only tools were all verified against a live, logged-in
 client — see [Limitations](#limitations).
 
@@ -575,7 +575,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-42 tools: 33 read-only plus 9 UI tools (`open_addon`, `close_addon`, `click_addon_element`, and the three `probe_*` enable/disable tools are mutating and hidden until
+45 tools: 33 read-only plus 12 UI/diagnostic tools (`open_addon`, `close_addon`, `click_addon_element`, and the six `probe_*` tools that install hooks are mutating and hidden until
 `AllowMutatingTools` is on; `get_addon_state` is read-only). Names are exactly as they appear in `tools/list`.
 
 ### Client and session
@@ -656,6 +656,9 @@ reason, never a thrown exception.
 | `probe_receive_event_enable_listener` | Same capture, but hooks a specific node's first registered listener instead of the addon itself (real component clicks land on node-registered listeners). | `addon` or `addonId`, `nodeId` (required) |
 | `probe_receive_event_disable` | Restores the hooked vtable slot. | none |
 | `probe_receive_event_dump` | Returns every captured `ReceiveEvent` call: event type, param, and the raw event/event-data buffers decoded at their FCS offsets. Read-only. | none |
+| `probe_callback_enable` | Diagnostic: hooks `AtkUnitBase.FireCallback` globally (the game's own addon callback entry, resolved from its call-site signature) so every callback the game performs is recorded with its decoded `AtkValue[]` arguments — the semantic layer real UI clicks funnel into, mirroring SimpleTweaks' Addon Logging → Callbacks. Use with `probe_callback_dump` to learn which `(addon, values)` payload reproduces an action. Mutating. | none |
+| `probe_callback_disable` | Unhooks the FireCallback probe. Mutating. | none |
+| `probe_callback_dump` | Returns every captured callback: addon name, value count, each `AtkValue` decoded by type (Int/UInt/Bool/Float/String/...), the close/update-visibility flag, and the return value. Read-only. | none |
 
 These are the plugin's first mutating tools: `open_addon` and `close_addon` are registered with the mutating
 flag, so they are filtered out of `tools/list` and rejected on `tools/call` while `AllowMutatingTools` is off
@@ -682,7 +685,7 @@ integer precision past 2^53 and 64-bit pointers routinely exceed that. The parse
 
 ## Safety model
 
-**Read-only by default.** 33 of the 42 tools read state; none writes it. The mutating gate is enforced, and the
+**Read-only by default.** 33 of the 45 tools read state; none writes it. The mutating gate is enforced, and the
 only tools registered behind it are the two UI tools that open and close addon windows — they stay invisible
 until `AllowMutatingTools` is turned on. There is still no chat-command or input-injection tool.
 
@@ -794,7 +797,7 @@ What was verified before that session, and still stands:
   with the **official** MCP SDK as the client — framing judged by somebody else's implementation, and all 36
   shipped schemas compiled against the JSON Schema 2020-12 meta-schema by the SDK's own `ajv`.
 - `tests\PluginLoadTest` passes `93/93` running the shipped `Plugin` constructor out of game: the real load
-  path executes, registers all 42 tools, binds the configured port, serves MCP over a real socket, validates every
+  path executes, registers all 45 tools, binds the configured port, serves MCP over a real socket, validates every
   shipped tool schema and cross-checks it against what the handlers demand, honours the
   request-log and bearer-token settings end to end, runs every `/dalamudmcp` subcommand against the live
   listener, reads **real game data** through a Reflection.Emit-built data manager backed by this machine's
