@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Standalone stdio<->HTTP shim for MCP clients that can only speak stdio.
+
+    Deliberately dependency-free (System.Text.Json only, no PackageReference) and
+    platform-neutral: it holds no Dalamud references, so it can be built and run
+    without the game or the plugin's assemblies being present.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>dalamud-mcp-bridge</AssemblyName>
+    <RootNamespace>DalamudMcpBridge</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

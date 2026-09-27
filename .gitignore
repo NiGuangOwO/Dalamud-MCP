@@ -1,0 +1,15 @@
+/bridge/DalamudMcpBridge/bin
+/bridge/DalamudMcpBridge/obj
+/src/DalamudMCP/bin
+/src/DalamudMCP/obj
+/tests/BridgeSmokeTest/bin
+/tests/BridgeSmokeTest/obj
+/tests/LoadabilityCheck/bin
+/tests/LoadabilityCheck/obj
+/tests/McpInterop/host/bin
+/tests/McpInterop/host/obj
+/tests/McpInterop/node_modules
+/tests/PluginLoadTest/bin
+/tests/PluginLoadTest/obj
+/tests/ProtocolSmokeTest/bin
+/tests/ProtocolSmokeTest/obj

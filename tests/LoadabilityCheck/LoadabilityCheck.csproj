@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>LoadabilityCheck</AssemblyName>
+    <RootNamespace>LoadabilityCheck</RootNamespace>
+    <!--
+      Checks the two failure modes that are invisible at compile time but fatal
+      in-game: a Plugin constructor parameter Dalamud cannot resolve, and a
+      duplicate tool name (ToolRegistry.Add throws on a repeat, and registration
+      happens inside the Plugin constructor).
+
+      References the CN dev assemblies directly and loads the BUILT plugin DLL by
+      path - it does not link any source, so it also proves the shipped binary
+      (not just the sources) has the expected shape.
+    -->
+    <NoWarn>CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

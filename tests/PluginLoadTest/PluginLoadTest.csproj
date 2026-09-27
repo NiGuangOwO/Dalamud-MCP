@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>PluginLoadTest</AssemblyName>
+    <RootNamespace>PluginLoadTest</RootNamespace>
+    <NoWarn>CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    Deliberately has NO references.
+
+    The plugin assembly and every Dalamud assembly it depends on are loaded at
+    runtime by path, and the twenty services the plugin's constructor asks for are
+    synthesized with DispatchProxy. That keeps this test decoupled from compile-time
+    knowledge of the plugin's signature, so it stays valid if the constructor or the
+    service set changes - and it means the test can exercise the SHIPPED binary
+    rather than a recompiled copy of it.
+  -->
+
+</Project>
