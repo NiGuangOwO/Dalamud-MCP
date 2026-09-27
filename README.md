@@ -1,5 +1,7 @@
 # Dalamud MCP
 
+English | [简体中文](README.zh-CN.md)
+
 A Dalamud plugin for FINAL FANTASY XIV that hosts a [Model Context Protocol](https://modelcontextprotocol.io)
 server on a loopback port, so an AI agent can read live game state from a running client. The plugin runs
 inside the game process, so it can read the same memory the client itself uses: the object table, the local
