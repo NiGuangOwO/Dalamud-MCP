@@ -16,7 +16,7 @@ The plugin targets `net10.0-windows7.0` and x64, and references the Dalamud asse
 XIVLauncher install rather than NuGet packages.
 
 ```powershell
-cd C:\Github\Dalamud-MCP\src\DalamudMCP
+cd <repo>\src\DalamudMCP
 dotnet build DalamudMCP.csproj -p:Platform=x64
 ```
 
@@ -72,7 +72,7 @@ that file on exit and would overwrite your change. Example location entry:
 
 ```json
 {
-  "Path": "C:\\Github\\Dalamud-MCP\\src\\DalamudMCP\\bin\\x64\\Debug\\DalamudMCP.dll",
+  "Path": "C:\\path\\to\\Dalamud-MCP\\src\\DalamudMCP\\bin\\x64\\Debug\\DalamudMCP.dll",
   "IsEnabled": true,
   "Nickname": null
 }
@@ -89,7 +89,7 @@ sources** — `McpServer.cs`, `MiniHttp.cs`, `ToolRegistry.cs` and `Json.cs` are
 Those four files deliberately have no Dalamud dependency, which is what makes the test possible.
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\ProtocolSmokeTest
+cd <repo>\tests\ProtocolSmokeTest
 dotnet run --project ProtocolSmokeTest.csproj -p:Platform=x64
 ```
 
@@ -123,7 +123,7 @@ running client.
 the built `dalamud-mcp-bridge.exe` as a child process, and speaks newline-delimited JSON-RPC to its stdin:
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\BridgeSmokeTest
+cd <repo>\tests\BridgeSmokeTest
 dotnet run --project BridgeSmokeTest.csproj -p:Platform=x64
 ```
 
@@ -147,7 +147,7 @@ duplicate tool name (`ToolRegistry.Add` throws on a repeat, and registration hap
 constructor).
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\LoadabilityCheck
+cd <repo>\tests\LoadabilityCheck
 dotnet run --project LoadabilityCheck.csproj
 ```
 
@@ -217,7 +217,7 @@ metadata. This one loads `DalamudMCP.dll` by path and instantiates `DalamudMCP.P
 services it asks for, each synthesized by `DispatchProxy`, then speaks MCP to the listener over real TCP.
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\PluginLoadTest
+cd <repo>\tests\PluginLoadTest
 dotnet run --project PluginLoadTest.csproj -p:Platform=x64
 ```
 
@@ -529,7 +529,7 @@ Then configure the client with the built executable:
 {
   "mcpServers": {
     "dalamud": {
-      "command": "C:\\Github\\Dalamud-MCP\\bridge\\DalamudMcpBridge\\bin\\Release\\net10.0\\dalamud-mcp-bridge.exe"
+      "command": "C:\\path\\to\\Dalamud-MCP\\bridge\\DalamudMcpBridge\\bin\\Release\\net10.0\\dalamud-mcp-bridge.exe"
     }
   }
 }
@@ -776,9 +776,10 @@ memory growth in the session store or the listener surviving many hours of polli
 
 **Other limitations:**
 
-- `tests\LoadabilityCheck` and `tests\PluginLoadTest` hardcode the repository path `C:\Github\Dalamud-MCP` and
-  read their Dalamud assemblies from `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`, so they only run as-is on this
-  machine. Move the checkout or use the global launcher and they exit non-zero.
+- `tests\LoadabilityCheck` and `tests\PluginLoadTest` locate the repository by walking up from their own
+  binary (or honor a `DALAMUD_MCP_REPO` environment variable), and read Dalamud assemblies from
+  `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`, so they only run as-is on a CN-launcher machine. Use the
+  global launcher and they exit non-zero.
 - The request log records the method, tool name, outcome and elapsed time — deliberately not argument
   bodies or result payloads, so it will not tell you *what* was passed to a call. Raw memory reads are
   logged by name only, and their arguments are not echoed anywhere.

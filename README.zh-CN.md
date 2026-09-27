@@ -14,7 +14,7 @@
 插件面向 `net10.0-windows7.0` 和 x64，引用本地 XIVLauncher 安装中的 Dalamud 程序集而非 NuGet 包。
 
 ```powershell
-cd C:\Github\Dalamud-MCP\src\DalamudMCP
+cd <仓库根目录>\src\DalamudMCP
 dotnet build DalamudMCP.csproj -p:Platform=x64
 ```
 
@@ -67,7 +67,7 @@ Dalamud 的开发插件支持由 `%APPDATA%\XIVLauncherCN\dalamudConfig.json`（
 
 ```json
 {
-  "Path": "C:\\Github\\Dalamud-MCP\\src\\DalamudMCP\\bin\\x64\\Debug\\DalamudMCP.dll",
+  "Path": "C:\\path\\to\\Dalamud-MCP\\src\\DalamudMCP\\bin\\x64\\Debug\\DalamudMCP.dll",
   "IsEnabled": true,
   "Nickname": null
 }
@@ -83,7 +83,7 @@ Dalamud 的开发插件支持由 `%APPDATA%\XIVLauncherCN\dalamudConfig.json`（
 Dalamud，这正是该测试成为可能的原因。
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\ProtocolSmokeTest
+cd <仓库根目录>\tests\ProtocolSmokeTest
 dotnet run --project ProtocolSmokeTest.csproj -p:Platform=x64
 ```
 
@@ -111,7 +111,7 @@ dotnet run --project ProtocolSmokeTest.csproj -p:Platform=x64
 `dalamud-mcp-bridge.exe` 作为子进程启动，通过其 stdin 说以换行分隔的 JSON-RPC：
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\BridgeSmokeTest
+cd <仓库根目录>\tests\BridgeSmokeTest
 dotnet run --project BridgeSmokeTest.csproj -p:Platform=x64
 ```
 
@@ -131,7 +131,7 @@ dotnet run --project BridgeSmokeTest.csproj -p:Platform=x64
 在重复时抛异常，而注册发生在 `Plugin` 构造函数内部）。
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\LoadabilityCheck
+cd <仓库根目录>\tests\LoadabilityCheck
 dotnet run --project LoadabilityCheck.csproj
 ```
 
@@ -192,7 +192,7 @@ FFXIVClientStructs 更新现在会在这里按名字失败，而不是在游戏�
 `DispatchProxy` 合成的二十个 Dalamud 服务实例化 `DalamudMCP.Plugin`，然后通过真实 TCP 与监听器说 MCP。
 
 ```powershell
-cd C:\Github\Dalamud-MCP\tests\PluginLoadTest
+cd <仓库根目录>\tests\PluginLoadTest
 dotnet run --project PluginLoadTest.csproj -p:Platform=x64
 ```
 
@@ -462,7 +462,7 @@ dotnet build bridge\DalamudMcpBridge\DalamudMcpBridge.csproj -c Release
 {
   "mcpServers": {
     "dalamud": {
-      "command": "C:\\Github\\Dalamud-MCP\\bridge\\DalamudMcpBridge\\bin\\Release\\net10.0\\dalamud-mcp-bridge.exe"
+      "command": "C:\\path\\to\\Dalamud-MCP\\bridge\\DalamudMcpBridge\\bin\\Release\\net10.0\\dalamud-mcp-bridge.exe"
     }
   }
 }
@@ -688,9 +688,9 @@ MCP 客户端
 
 **其他局限：**
 
-- `tests\LoadabilityCheck` 与 `tests\PluginLoadTest` 硬编码仓库路径 `C:\Github\Dalamud-MCP`，并从
-  `%APPDATA%\XIVLauncherCN\addon\Hooks\dev` 读取 Dalamud 程序集，所以只在本机原样运行。移动检出或使用
-  国际服启动器都会以非零码退出。
+- `tests\LoadabilityCheck` 与 `tests\PluginLoadTest` 从自身二进制位置向上查找仓库根（也可用 `DALAMUD_MCP_REPO`
+  环境变量显式指定），并从 `%APPDATA%\XIVLauncherCN\addon\Hooks\dev` 读取 Dalamud 程序集，所以只在本机
+  原样运行。使用国际服启动器会以非零码退出。
 - 请求日志记录方法、工具名、结果与耗时 —— 刻意不记录参数体或结果载荷，所以它不会告诉你*传了什么*。
   原始内存读取只按名称记录，其参数不会出现在任何地方。
 - 插件本身没有 stdio 传输；支持 HTTP 的客户端直连，仅 stdio 的客户端走 `bridge\DalamudMcpBridge`。

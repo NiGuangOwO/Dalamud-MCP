@@ -48,7 +48,10 @@ internal static class Program
 
     private static int Main()
     {
-        var repo = @"C:\Github\Dalamud-MCP";
+        var repo = FindRepoRoot()
+            ?? throw new InvalidOperationException(
+                "could not locate the Dalamud-MCP repository (walked up from "
+                + AppContext.BaseDirectory + "); set DALAMUD_MCP_REPO to the checkout root");
         var devDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "XIVLauncherCN", "addon", "Hooks", "dev");
@@ -814,5 +817,25 @@ internal static class Program
     {
         try { return assembly.GetTypes(); }
         catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null)!; }
+    }
+
+    /// <summary>
+    /// Locates the repository root by walking up from the test binary, honoring
+    /// DALAMUD_MCP_REPO as an explicit override. No hardcoded absolute path: the
+    /// checkout can live anywhere.
+    /// </summary>
+    private static string? FindRepoRoot()
+    {
+        var overridePath = Environment.GetEnvironmentVariable("DALAMUD_MCP_REPO");
+        if (!string.IsNullOrWhiteSpace(overridePath) && Directory.Exists(overridePath))
+            return Path.GetFullPath(overridePath);
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, "src", "DalamudMCP"))) return dir.FullName;
+            dir = dir.Parent;
+        }
+        return null;
     }
 }
