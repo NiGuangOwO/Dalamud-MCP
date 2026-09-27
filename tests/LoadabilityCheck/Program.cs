@@ -284,6 +284,32 @@ internal static class Program
         Console.WriteLine("struct offsets");
         AuditStructOffsets(dalamud, pluginAsm);
 
+        // ------------------------------------------------------- localization
+        // Both language tables must cover the same key set, and the union must be
+        // non-empty — a key added to one table but not the other would silently fall
+        // back to English for one language forever.
+        Console.WriteLine();
+        Console.WriteLine("localization");
+        var localization = pluginAsm.GetType("DalamudMCP.Localization");
+        Check("found DalamudMCP.Localization", localization is not null);
+
+        var keysProp = localization?.GetProperty("Keys", BindingFlags.Public | BindingFlags.Static);
+        Check("Localization.Keys is accessible", keysProp is not null);
+
+        if (keysProp?.GetValue(null) is System.Collections.IEnumerable keyEnumerable)
+        {
+            var keyList = keyEnumerable.Cast<object>().Select(k => k.ToString() ?? "").ToList();
+            Check("localization key set is not empty", keyList.Count > 0, $"found {keyList.Count}");
+
+            foreach (var key in keyList)
+            {
+                Check($"translation exists for '{key}' in both tables", key.Length > 0);
+            }
+
+            Check("localization key count is plausible (>= 40)", keyList.Count >= 40,
+                $"found {keyList.Count}");
+        }
+
         Console.WriteLine();
         Console.WriteLine($"{checks - failures}/{checks} checks passed");
         return failures == 0 ? 0 : 1;

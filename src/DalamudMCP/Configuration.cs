@@ -52,6 +52,12 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Auto-start the listener when the plugin loads.</summary>
     public bool AutoStart { get; set; } = true;
 
+    /// <summary>
+    /// UI/command language: "auto" follows the game client language, or an explicit
+    /// code accepted by <see cref="Localization.Normalize"/> ("en", "zh", ...).
+    /// </summary>
+    public string Language { get; set; } = Localization.Auto;
+
     public void Save(IDalamudPluginInterface pluginInterface)
     {
         pluginInterface.SavePluginConfig(this);
@@ -65,5 +71,6 @@ public sealed class Configuration : IPluginConfiguration
         if (MaxObjectResults is < 1 or > 5000) MaxObjectResults = 200;
         if (MaxMemoryReadBytes is < 16 or > 1024 * 1024) MaxMemoryReadBytes = 65536;
         AuthToken ??= string.Empty;
+        Language = Localization.Normalize(Language) is { } lang ? lang : Localization.Auto;
     }
 }

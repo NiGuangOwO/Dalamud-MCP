@@ -81,6 +81,10 @@ public sealed class Plugin : IDalamudPlugin
         Config = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         Config.Sanitize();
 
+        // Pick the string table before anything user-facing is constructed. "auto"
+        // follows the game client's language so a Chinese client gets Chinese UI.
+        Localization.Initialize(Config.Language, clientState.ClientLanguage.ToString());
+
         services = new GameServices
         {
             Log = log,
@@ -120,7 +124,7 @@ public sealed class Plugin : IDalamudPlugin
 
         commandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Dalamud MCP: open settings (/dalamudmcp start|stop|restart|status|port <n>).",
+            HelpMessage = Localization.T("cmd.help"),
             ShowInHelp = true,
         });
 
@@ -181,7 +185,7 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             LogError($"failed to start MCP server on port {Config.Port}: {ex.GetType().Name}: {ex.Message}");
-            toastGui.ShowError($"Dalamud MCP could not bind port {Config.Port}. See /xllog.");
+            toastGui.ShowError(Localization.T("toast.bindFailed", Config.Port));
 
             server?.Dispose();
             server = null;
@@ -228,24 +232,25 @@ public sealed class Plugin : IDalamudPlugin
             case "start":
                 StartServer();
                 Print(IsRunning
-                    ? $"listening on {Endpoint}"
-                    : $"could not start on port {Config.Port}; see /xllog");
+                    ? Localization.T("cmd.listeningOn", Endpoint)
+                    : Localization.T("cmd.startFailed", Config.Port));
                 break;
 
             case "stop":
                 StopServer();
-                Print("stopped");
+                Print(Localization.T("cmd.stopped"));
                 break;
 
             case "restart":
                 StartServer();
-                Print(IsRunning ? $"restarted on {Endpoint}" : "restart failed; see /xllog");
+                Print(IsRunning ? Localization.T("cmd.restartedOn", Endpoint) : Localization.T("cmd.restartFailed"));
                 break;
 
             case "status":
                 Print(IsRunning
-                    ? $"running on {Endpoint} - {ToolCount} tools, {ActiveSessions} session(s), auth {(string.IsNullOrEmpty(Config.AuthToken) ? "off" : "on")}"
-                    : $"stopped (port {Config.Port})");
+                    ? Localization.T("cmd.statusRunning", Endpoint, ToolCount, ActiveSessions,
+                        string.IsNullOrEmpty(Config.AuthToken) ? Localization.T("ui.authOnOffOff") : Localization.T("ui.authOnOff"))
+                    : Localization.T("cmd.statusStopped", Config.Port));
                 break;
 
             case "port":
@@ -254,21 +259,23 @@ public sealed class Plugin : IDalamudPlugin
                     Config.Port = port;
                     SaveConfig();
                     if (IsRunning) StartServer();
-                    Print($"port set to {port} ({(IsRunning ? "restarted" : "not running")})");
+                    Print(Localization.T("cmd.portSet", port,
+                        IsRunning ? Localization.T("cmd.portRestarted") : Localization.T("cmd.portNotRunning")));
                 }
                 else
                 {
-                    Print($"usage: {CommandName} port <1024-65535>");
+                    Print(Localization.T("cmd.portUsage", CommandName));
                 }
 
                 break;
 
             case "tools":
-                Print($"{ToolCount} tools registered: {string.Join(", ", registry.Tools.Select(t => t.Name))}");
+                Print(Localization.T("cmd.toolsRegistered", ToolCount,
+                    string.Join(", ", registry.Tools.Select(t => t.Name))));
                 break;
 
             default:
-                Print($"unknown subcommand '{verb[0]}'. Try: start, stop, restart, status, port <n>, tools");
+                Print(Localization.T("cmd.unknownSubcommand", verb[0]));
                 break;
         }
     }

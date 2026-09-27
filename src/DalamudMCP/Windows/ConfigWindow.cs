@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -20,7 +21,7 @@ public sealed class ConfigWindow : Window
     private readonly Plugin plugin;
 
     public ConfigWindow(Plugin plugin)
-        : base("Dalamud MCP###DalamudMCPConfig")
+        : base(Localization.T("ui.title"))
     {
         this.plugin = plugin;
 
@@ -45,7 +46,7 @@ public sealed class ConfigWindow : Window
 
         // ---------------------------------------------------------- listener
         var enabled = config.Enabled;
-        if (ImGui.Checkbox("Enabled", ref enabled))
+        if (ImGui.Checkbox(Localization.T("ui.enabled"), ref enabled))
         {
             config.Enabled = enabled;
             Persist();
@@ -53,7 +54,7 @@ public sealed class ConfigWindow : Window
 
         ImGui.SameLine();
         var autoStart = config.AutoStart;
-        if (ImGui.Checkbox("Auto-start with the plugin", ref autoStart))
+        if (ImGui.Checkbox(Localization.T("ui.autoStart"), ref autoStart))
         {
             config.AutoStart = autoStart;
             Persist();
@@ -61,7 +62,7 @@ public sealed class ConfigWindow : Window
 
         var port = config.Port;
         ImGui.SetNextItemWidth(140);
-        if (ImGui.InputInt("Port", ref port))
+        if (ImGui.InputInt(Localization.T("ui.port"), ref port))
         {
             // Clamped here rather than on save so the field cannot show a bogus value.
             config.Port = Math.Clamp(port, 1024, 65535);
@@ -69,30 +70,30 @@ public sealed class ConfigWindow : Window
             needsRestart = true;
         }
 
-        ImGui.TextDisabled("Bound to 127.0.0.1 only - the listener is never reachable from the network.");
+        ImGui.TextDisabled(Localization.T("ui.boundLocal"));
 
         ImGui.Spacing();
 
         var timeout = (float)config.FrameworkTimeoutSeconds;
         ImGui.SetNextItemWidth(240);
-        if (ImGui.SliderFloat("Framework timeout (s)", ref timeout, 0.5f, 60.0f, "%.1f"))
+        if (ImGui.SliderFloat(Localization.T("ui.timeout"), ref timeout, 0.5f, 60.0f, "%.1f"))
         {
             config.FrameworkTimeoutSeconds = timeout;
             Persist();
             needsRestart = true;
         }
 
-        ImGui.TextDisabled("How long a tool call waits for the game's framework thread before failing.");
+        ImGui.TextDisabled(Localization.T("ui.timeoutHint"));
 
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 
         // ------------------------------------------------------------ safety
-        ImGui.Text("Agent access");
+        ImGui.Text(Localization.T("ui.agentAccess"));
 
         var mutating = config.AllowMutatingTools;
-        if (ImGui.Checkbox("Allow mutating tools", ref mutating))
+        if (ImGui.Checkbox(Localization.T("ui.allowMutating"), ref mutating))
         {
             config.AllowMutatingTools = mutating;
             Persist();
@@ -101,20 +102,20 @@ public sealed class ConfigWindow : Window
         ImGui.SameLine();
         if (config.AllowMutatingTools)
         {
-            ImGui.TextColored(Pack(WarnColor), "agents may change game state");
+            ImGui.TextColored(Pack(WarnColor), Localization.T("ui.mutatingWarn"));
         }
         else
         {
-            ImGui.TextDisabled("read-only (recommended)");
+            ImGui.TextDisabled(Localization.T("ui.readOnly"));
         }
 
-        ImGui.TextDisabled("When off, tools that change game state are hidden from and rejected for clients.");
+        ImGui.TextDisabled(Localization.T("ui.mutatingHint"));
 
         ImGui.Spacing();
 
         var token = config.AuthToken ?? string.Empty;
         ImGui.SetNextItemWidth(320);
-        if (ImGui.InputText("Auth token", ref token, 256))
+        if (ImGui.InputText(Localization.T("ui.authToken"), ref token, 256))
         {
             config.AuthToken = token.Trim();
             Persist();
@@ -122,11 +123,11 @@ public sealed class ConfigWindow : Window
 
         if (string.IsNullOrEmpty(config.AuthToken))
         {
-            ImGui.TextDisabled("Empty = no authentication. Any local process can reach the port.");
+            ImGui.TextDisabled(Localization.T("ui.authOff"));
         }
         else
         {
-            ImGui.TextDisabled("Clients must send: Authorization: Bearer <token>");
+            ImGui.TextDisabled(Localization.T("ui.authOn"));
         }
 
         ImGui.Spacing();
@@ -134,11 +135,11 @@ public sealed class ConfigWindow : Window
         ImGui.Spacing();
 
         // ----------------------------------------------------------- limits
-        ImGui.Text("Limits");
+        ImGui.Text(Localization.T("ui.limits"));
 
         var maxObjects = config.MaxObjectResults;
         ImGui.SetNextItemWidth(140);
-        if (ImGui.InputInt("Max object results", ref maxObjects))
+        if (ImGui.InputInt(Localization.T("ui.maxObjects"), ref maxObjects))
         {
             config.MaxObjectResults = Math.Clamp(maxObjects, 1, 5000);
             Persist();
@@ -146,16 +147,34 @@ public sealed class ConfigWindow : Window
 
         var maxBytes = config.MaxMemoryReadBytes;
         ImGui.SetNextItemWidth(140);
-        if (ImGui.InputInt("Max memory read (bytes)", ref maxBytes, 1024, 16384))
+        if (ImGui.InputInt(Localization.T("ui.maxMemory"), ref maxBytes, 1024, 16384))
         {
             config.MaxMemoryReadBytes = Math.Clamp(maxBytes, 16, 1024 * 1024);
             Persist();
         }
 
         var logRequests = config.LogRequests;
-        if (ImGui.Checkbox("Log every MCP request", ref logRequests))
+        if (ImGui.Checkbox(Localization.T("ui.logRequests"), ref logRequests))
         {
             config.LogRequests = logRequests;
+            Persist();
+        }
+
+        // ---------------------------------------------------------- language
+        var currentLanguage = config.Language;
+        var currentIndex = 0;
+        for (var i = 0; i < Localization.Choices.Count; i++)
+        {
+            if (Localization.Choices[i].Code == currentLanguage) currentIndex = i;
+        }
+
+        ImGui.SetNextItemWidth(240);
+        if (ImGui.Combo(Localization.T("ui.language"), ref currentIndex,
+                string.Join("\0", Localization.Choices.Select(c => c.Label)) + "\0",
+                Localization.Choices.Count))
+        {
+            config.Language = Localization.Choices[currentIndex].Code;
+            Localization.Initialize(config.Language, null);
             Persist();
         }
 
@@ -164,25 +183,25 @@ public sealed class ConfigWindow : Window
         ImGui.Spacing();
 
         // ------------------------------------------------------------ tools
-        if (ImGui.Button("Save now"))
+        if (ImGui.Button(Localization.T("ui.saveNow")))
         {
             plugin.SaveConfig();
-            plugin.Notify("settings saved");
+            plugin.Notify(Localization.T("ui.saved"));
         }
 
         ImGui.SameLine();
         if (IsRunning())
         {
-            if (ImGui.Button("Restart listener"))
+            if (ImGui.Button(Localization.T("ui.restartListener")))
             {
                 plugin.SaveConfig();
                 plugin.StartServer();
                 needsRestart = false;
-                plugin.Notify("listener restarted");
+                plugin.Notify(Localization.T("cmd.restartedOn", plugin.Endpoint));
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("Stop listener"))
+            if (ImGui.Button(Localization.T("ui.stopListener")))
             {
                 plugin.StopServer();
                 needsRestart = false;
@@ -190,7 +209,7 @@ public sealed class ConfigWindow : Window
         }
         else
         {
-            if (ImGui.Button("Start listener"))
+            if (ImGui.Button(Localization.T("ui.startListener")))
             {
                 plugin.SaveConfig();
                 plugin.StartServer();
@@ -199,7 +218,7 @@ public sealed class ConfigWindow : Window
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Open config folder"))
+        if (ImGui.Button(Localization.T("ui.openConfigFolder")))
         {
             // Presented as a convenience; failures are logged rather than thrown, since a
             // missing shell association must not take down the window.
@@ -220,11 +239,11 @@ public sealed class ConfigWindow : Window
         if (needsRestart && IsRunning())
         {
             ImGui.Spacing();
-            ImGui.TextColored(Pack(WarnColor), "Port and timeout changes apply after the listener restarts.");
+            ImGui.TextColored(Pack(WarnColor), Localization.T("ui.restartNeeded"));
         }
 
         ImGui.Spacing();
-        ImGui.TextDisabled($"Tools registered: {plugin.ToolCount}. Use /dalamudmcp tools to list them.");
+        ImGui.TextDisabled(Localization.T("ui.toolsRegistered", plugin.ToolCount));
     }
 
     /// <summary>
@@ -242,25 +261,26 @@ public sealed class ConfigWindow : Window
         var running = IsRunning();
         var endpoint = plugin.Endpoint;
 
-        ImGui.Text("Status:");
+        ImGui.Text(Localization.T("ui.status"));
         ImGui.SameLine();
 
         if (running)
         {
-            ImGui.TextColored(Pack(OkColor), "listening");
+            ImGui.TextColored(Pack(OkColor), Localization.T("ui.listening"));
             ImGui.SameLine();
-            ImGui.Text($"at {endpoint}");
+            ImGui.Text(Localization.T("ui.at", endpoint));
         }
         else
         {
-            ImGui.TextColored(Pack(WarnColor), "stopped");
+            ImGui.TextColored(Pack(WarnColor), Localization.T("cmd.stopped"));
             ImGui.SameLine();
-            ImGui.Text($"- would listen on {endpoint}");
+            ImGui.Text(Localization.T("ui.wouldListen", endpoint));
         }
 
-        ImGui.TextDisabled(
-            $"tools: {plugin.ToolCount}   sessions: {plugin.ActiveSessions}   " +
-            $"auth: {(string.IsNullOrEmpty(plugin.Config.AuthToken) ? "off" : "on")}");
+        ImGui.TextDisabled(Localization.T("ui.stats", plugin.ToolCount, plugin.ActiveSessions,
+            string.IsNullOrEmpty(plugin.Config.AuthToken)
+                ? Localization.T("ui.authOnOffOff")
+                : Localization.T("ui.authOnOff")));
     }
 
     private bool IsRunning() => plugin.IsRunning;

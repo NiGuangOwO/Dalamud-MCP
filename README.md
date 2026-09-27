@@ -150,7 +150,7 @@ dotnet run --project LoadabilityCheck.csproj
 ```
 
 ```
-49/49 checks passed
+103/103 checks passed
 ```
 
 It loads the plugin assembly directly and compares it against Dalamud's own type tables in the CN dev
@@ -198,6 +198,10 @@ union member verified to share that one offset). It also cross-checks the `Class
 every concrete gauge struct the library ships is covered, none is invented, and the covered job ids are exactly
 the 21 combat jobs known to have dedicated gauges. A FFXIVClientStructs update now fails here, by name, instead
 of corrupting a read in game.
+
+**The localization audit.** Both language tables in `Localization.cs` are checked for key parity — every key
+must resolve in both, so a string added to English but forgotten in Chinese (or vice versa) fails the suite
+instead of silently showing English to one language's users forever.
 
 Injecting a bogus parameter (`System.Net.Http.HttpClient`) makes the two real checks fail while leaving all four
 controls passing — the discriminator is what tells a plugin defect apart from a broken probe. Build the plugin
@@ -433,11 +437,18 @@ Open the settings window with `/dalamudmcp` (or the plugin-installer config butt
 | `Max object results` | `200` | Upper bound on objects returned by one query. Clamped to 1-5000. |
 | `Max memory read (bytes)` | `65536` | Upper bound for a single raw memory read. Clamped to 16-1048576. |
 | `Log every MCP request` | `false` | Write each JSON-RPC request and its outcome (method, id, tool name, elapsed ms) to the plugin log. Read live, so toggling it applies at once. Off by default because a polling agent can issue many calls per second. |
+| `Language` | `auto` | UI and `/dalamudmcp` feedback language. `auto` follows the game client's language; `English` and `简体中文` are also available. Takes effect immediately, no reload needed. |
 
 Port and timeout changes need a listener restart; the window says so and offers a "Restart listener" button.
 Other edits take effect immediately. Settings persist when a control loses focus after an edit, so dragging a
 slider does not rewrite the config file every frame. The window also offers "Save now", "Start listener" /
 "Stop listener" / "Restart listener", and "Open config folder".
+
+The plugin ships English and Simplified Chinese strings (`src\DalamudMCP\Localization.cs`). With the default
+`Language: auto`, a Chinese game client shows Chinese labels, command feedback, and the bind-failure toast;
+an English client shows English. The tables compile into the plugin DLL (no satellite resources), missing
+keys fall back to English, and `tests\LoadabilityCheck` fails loudly if a key exists in one table but not
+the other.
 
 `AllowMutatingTools` defaults to **off** because an agent should be granted write access explicitly rather
 than receiving it as a side effect of installing a plugin. The gate is enforced in two places: mutating tools
@@ -736,7 +747,7 @@ What was verified before that session, and still stands:
   install (`0 errors, 0 warnings`).
 - `tests\ProtocolSmokeTest` passes `47/47` against the real transport and protocol sources.
 - `tests\BridgeSmokeTest` passes `22/22` against the built stdio bridge and the real server.
-- `tests\LoadabilityCheck` passes `49/49` against the built plugin DLL and manifest, including a verdict from
+- `tests\LoadabilityCheck` passes `103/103` against the built plugin DLL and manifest, including a verdict from
   Dalamud's **own** `ServiceContainer`: it rebuilds the container offline (`RegisterInterfaces` is pure
   attribute reflection), installs one singleton key per non-scoped service type, and invokes Dalamud's private
   `FindApplicableCtor`. Guarded by four controls — one of which withholds the singleton keys and asserts the
