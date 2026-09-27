@@ -583,6 +583,11 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 关闭（默认）时，它们会从 `tools/list` 中被过滤、`tools/call` 会拒绝。失败（agent 模块未初始化、agent 不可
 打开）像工具集其余部分一样返回结构化 `{"available": false, "reason": ...}` 而不是抛异常。
 
+两个方向都已在游戏内用实时客户端验证：`open_addon currency` 打开货币窗口、`close_addon currency` 关闭它
+（经目视确认）。一个需要了解的怪癖：`get_addon_state` 报告的是 `AgentInterface.IsAgentActive`，它不会在
+每个 agent 的窗口显示时都翻转 —— 窗口可以肉眼可见地开着而其 agent 仍报告未激活。该普查只是提示，不是
+事实基准；可靠的操作是 `open_addon`/`close_addon`。
+
 `read_memory` 与 `read_object_memory` 的合法 `format` 值：`hexdump`、`bytes`、`u8`、`u16`、`u32`、`u64`、
 `i8`、`i16`、`i32`、`i64`、`f32`、`f64`、`bool`、`string`、`utf16`、`pointer`。
 

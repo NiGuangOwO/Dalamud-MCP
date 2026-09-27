@@ -123,7 +123,8 @@ internal static class UiTools
                 names,
                 "Which addon to open.",
                 true),
-            args => OpenAddon(args));
+            args => OpenAddon(args),
+            mutating: true);
 
         registry.Add(
             "close_addon",
@@ -138,7 +139,8 @@ internal static class UiTools
                 names,
                 "Which addon to close.",
                 true),
-            args => CloseAddon(args));
+            args => CloseAddon(args),
+            mutating: true);
 
         registry.Add(
             "get_addon_state",

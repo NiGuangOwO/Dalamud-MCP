@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -157,6 +157,9 @@ internal static class Program
         // Turned on BEFORE the plugin is constructed, so the live protocol checks below also
         // prove that Plugin.StartServer forwards this setting to the server it builds.
         Set(config, "LogRequests", true);
+        // Mutating tools on, so tools/list exposes the full 36-tool set over the real socket and
+        // the sweep can exercise open_addon/close_addon's argument validation.
+        Set(config, "AllowMutatingTools", true);
 
         var log = new List<string>();
         var commandsAdded = new List<string>();

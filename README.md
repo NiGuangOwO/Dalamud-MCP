@@ -656,6 +656,12 @@ flag, so they are filtered out of `tools/list` and rejected on `tools/call` whil
 (the default). Failures (agent module not initialized, agent not openable) return structured
 `{"available": false, "reason": ...}` instead of throwing, like the rest of the tool set.
 
+Both directions were verified in-game with a live client: `open_addon currency` opens the Currency window and
+`close_addon currency` closes it (confirmed visually). One quirk to know: `get_addon_state` reports
+`AgentInterface.IsAgentActive`, which does not flip for every agent when its window shows — a window can be
+visibly open while its agent still reports inactive. The census is a hint, not ground truth; `open_addon`/
+`close_addon` are the reliable operations.
+
 Valid `format` values for `read_memory` and `read_object_memory`: `hexdump`, `bytes`, `u8`, `u16`, `u32`,
 `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `string`, `utf16`, `pointer`.
 
