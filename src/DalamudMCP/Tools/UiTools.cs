@@ -1,9 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using DalamudMCP.Mcp;
+using FFXIVClientStructs.FFXIV.Client.System.String;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace DalamudMCP.Tools;
 
@@ -15,16 +18,18 @@ namespace DalamudMCP.Tools;
 /// to <c>tools/list</c> and refused by <c>tools/call</c> while the <c>AllowMutatingTools</c>
 /// configuration switch is off 鈥?the same two-place gate every future state-changing tool
 /// inherits. The actions themselves are bounded to what a player could do with a keyboard
-/// shortcut: show or hide a system window, or ask which ones are open. Nothing here types into
-/// the game, fires addon callbacks, or touches combat state.</para>
+/// shortcut: show or hide a system window, or ask which ones are open. The click surface
+/// (click_addon_element) is likewise bounded to dispatching one Atk UI event at a synthetic
+/// position inside a window the agent has already enumerated — the moral equivalent of moving
+/// the mouse and clicking, not a macro engine: nothing here types text, fires addon callbacks
+/// with crafted AtkValue payloads, or touches combat state.</para>
 ///
-/// <para>The mechanics: FFXIVClientStructs' <see cref="AgentInterface.Show"/> resolves the
-/// singleton agent for an <see cref="AgentId"/> and shows its addon 鈥?the same path the game's
-/// own keybinds take, so window placement, focus and state handling stay the client's own.
-/// <see cref="AgentInterface.IsAgentActive"/> reports whether the agent currently considers
-/// itself active (its window open). Agent lookups go through the static
-/// <see cref="AgentModule.Instance"/>; both the module pointer and the per-agent pointer are
-/// null-checked rather than trusted, and every failure becomes a structured
+/// <para>The list/click mechanics go one layer below the agent layer, to the game's own UI
+/// tree: RaptureAtkUnitManager resolves a loaded addon (AtkUnitBase), its RootNode tree is
+/// walked for element discovery (ids, labels, screen rectangles), and clicking dispatches
+/// AtkEventType.MouseClick / ButtonClick (or the component-list item path) through the
+/// addon's own ReceiveEvent — the same dispatch the real input pipeline feeds. Every pointer
+/// is null-checked rather than trusted, and every failure becomes a structured
 /// <c>available=false</c> answer with a reason, never an escaped exception.</para>
 /// </summary>
 internal static class UiTools
@@ -149,6 +154,81 @@ internal static class UiTools
             "active (its window open), keyed by the same names open_addon accepts. Read-only.",
             Json.Schema(),
             _ => AddonState());
+
+        registry.Add(
+            "list_addon_elements",
+            "List addon (UI window) elements",
+            "Walks a loaded addon's UI node tree and reports its clickable elements: node id, " +
+            "type, label text, screen rectangle, and visible/enabled state. Pass 'addon' as a " +
+            "name from get_addon_state's allowlist, or 'addonId' as the raw AtkUnitBase id. " +
+            "Use the returned nodeId with click_addon_element. Read-only.",
+            Json.Schema(
+                ("addon", "string", "Addon name to inspect (same names open_addon accepts)", false),
+                ("addonId", "integer", "Raw AtkUnitBase id of the addon to inspect (overrides addon)", false),
+                ("maxDepth", "integer", "Maximum node-tree depth to walk (default 12)", false),
+                ("maxNodes", "integer", "Maximum elements to report (default 100)", false),
+                ("allNodes", "boolean", "Report every node, not just labeled/clickable ones (default false)", false)),
+            args => ListAddonElements(args));
+
+        registry.Add(
+            "click_addon_element",
+            "Click an addon (UI window) element",
+            "Dispatches one UI event (default: left click) at a node inside a loaded addon, " +
+            "through the addon's own event pipeline — the same dispatch a real mouse click " +
+            "feeds it. Resolve a nodeId with list_addon_elements first. For list components " +
+            "you may pass 'index' to click a list item directly. This is a mutating tool: it " +
+            "is hidden from tools/list and refused by tools/call while the plugin's " +
+            "allow-mutating-tools switch is off.",
+            Json.Schema(
+                ("addon", "string", "Addon name to click inside (same names open_addon accepts)", false),
+                ("addonId", "integer", "Raw AtkUnitBase id of the addon to click inside (overrides addon)", false),
+                ("nodeId", "integer", "Target node id from list_addon_elements", false),
+                ("index", "integer", "For list components: the item index to click instead of a nodeId", false),
+                ("event", "string", "Which event to dispatch: click (default), doubleClick, buttonClick, or 'registered' to fire every handler the node has registered (closest to a real mouse click)", false),
+                ("param", "integer", "Override the event callback param (uint32). Advanced: the game normally derives it from the node's registered handler; ClickLib-style close buttons need 0xFFFFFFFF (-1)", false)),
+            args => ClickAddonElement(args),
+            mutating: true);
+
+        // Temporary diagnostic tools for the click-dispatch investigation. Mutating: the
+        // enable variant swaps a live vtable slot inside the game process.
+        registry.Add(
+            "probe_receive_event_enable",
+            "Hook one addon's ReceiveEvent (diagnostic)",
+            "Temporary diagnostic: swaps the ReceiveEvent vtable slot of one loaded addon so " +
+            "every UI event it receives (real mouse clicks and synthetic dispatches alike) is " +
+            "captured before being forwarded. Pass 'addon' (any loaded addon name) or 'addonId'. " +
+            "Use probe_receive_event_dump to read captures. Mutating.",
+            Json.Schema(
+                ("addon", "string", "Addon name to hook (raw loaded addon name, e.g. Currency)", false),
+                ("addonId", "integer", "Raw AtkUnitBase id of the addon to hook (overrides addon)", false)),
+            args => ProbeEnable(args),
+            mutating: true);
+
+        registry.Add(
+            "probe_receive_event_disable",
+            "Unhook the ReceiveEvent probe (diagnostic)",
+            "Restores the ReceiveEvent vtable slot captured by probe_receive_event_enable. " +
+            "Mutating.",
+            Json.Schema(),
+            _ => AtkEventProbe.Disable(),
+            mutating: true);
+
+        registry.Add(
+            "probe_receive_event_dump",
+            "Dump captured ReceiveEvent calls (diagnostic)",
+            "Returns every ReceiveEvent invocation captured since the hook was enabled: event " +
+            "type, param, and the raw event / event-data buffers decoded at their FCS offsets. " +
+            "Read-only.",
+            Json.Schema(),
+            _ => AtkEventProbe.Dump());
+    }
+
+    private static unsafe object ProbeEnable(JObject args)
+    {
+        var unit = ResolveAddon(args["addon"]?.Value<string>(), args["addonId"]);
+        if (unit is null)
+            return Json.ToolError("no addon resolved for probe_receive_event_enable");
+        return AtkEventProbe.Enable(unit);
     }
 
     // ---------------------------------------------------------------- handlers
@@ -229,6 +309,696 @@ internal static class UiTools
             ["active"] = active,
             ["inactive"] = inactive,
         };
+    }
+
+    // ---------------------------------------------------------------- addon element tools
+
+    private static unsafe object ListAddonElements(JObject args)
+    {
+        var addonName = args["addon"]?.Value<string>();
+        var addonIdArg = args["addonId"];
+        var maxDepth = ClampInt(args["maxDepth"], 1, 40, 12);
+        var maxNodes = ClampInt(args["maxNodes"], 1, 500, 100);
+        var allNodes = args["allNodes"]?.Value<bool>() ?? false;
+
+        var unit = ResolveAddon(addonName, addonIdArg);
+        if (unit is null)
+        {
+            var loaded = string.Empty;
+            var mgr = SafeRaptureAtkUnitManager();
+            if (mgr is not null)
+                loaded = DescribeLoadedAddons(mgr);
+            return addonName is not null
+                ? Json.ToolError($"no loaded addon named '{addonName}' was found; open it with " +
+                                 $"open_addon first, or pass the addon's raw addonId.{loaded}")
+                : Json.ToolError("no addon resolved; pass 'addon' (a name from the open_addon " +
+                                 "allowlist) or 'addonId'");
+        }
+
+        var root = unit->RootNode;
+        if (root is null)
+        {
+            return new JObject
+            {
+                ["available"] = false,
+                ["reason"] = $"addon '{unit->NameString}' is loaded but has no root node yet",
+            };
+        }
+
+        var elements = new JArray();
+        var truncated = false;
+        var visited = new HashSet<nuint>();
+        // Top-level nodes live in the addon's UldManager node list (an array), not in the
+        // RootNode's child chain — RootNode->ChildCount (e.g. 110) far exceeds the one
+        // linked child, so the authoritative enumeration is UldManager.NodeList. The list
+        // also contains nested nodes, so a visited set keeps the child/sibling descent from
+        // emitting the same node twice.
+        var uldNodeCount = Math.Min((int)unit->UldManager.NodeListCount, 512);
+        for (var i = 0; i < uldNodeCount && !truncated; i++)
+        {
+            var n = unit->UldManager.NodeList[i];
+            WalkNode(n, unit, 0, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+        }
+
+        if (elements.Count == 0)
+            WalkNode(root, unit, 0, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+
+        return new JObject
+        {
+            ["addon"] = unit->NameString,
+            ["addonId"] = (int)unit->Id,
+            ["x"] = (int)unit->GetX(),
+            ["y"] = (int)unit->GetY(),
+            ["scale"] = (float)unit->Scale,
+            ["truncated"] = truncated,
+            ["elements"] = elements,
+        };
+    }
+
+    private static unsafe object ClickAddonElement(JObject args)
+    {
+        var addonName = args["addon"]?.Value<string>();
+        var addonIdArg = args["addonId"];
+        var nodeIdArg = args["nodeId"];
+        var indexArg = args["index"];
+        var eventName = args["event"]?.Value<string>() ?? "click";
+        var paramArg = args["param"];
+
+        AtkEventType? eventType = eventName switch
+        {
+            null or "" or "click" => AtkEventType.MouseClick,
+            "doubleClick" => AtkEventType.MouseDoubleClick,
+            "buttonClick" => AtkEventType.ButtonClick,
+            "registered" => AtkEventType.MouseClick, // event itself ignored; every registered handler fires
+            _ => null,
+        };
+        if (eventType is null)
+            return Json.ToolError($"unknown event '{eventName}'; use click, doubleClick or buttonClick");
+
+        var unit = ResolveAddon(addonName, addonIdArg);
+        if (unit is null)
+        {
+            var loaded = string.Empty;
+            var mgr = SafeRaptureAtkUnitManager();
+            if (mgr is not null)
+                loaded = DescribeLoadedAddons(mgr);
+            return addonName is not null
+                ? Json.ToolError($"no loaded addon named '{addonName}' was found; open it with " +
+                                 $"open_addon first, or pass the addon's raw addonId.{loaded}")
+                : Json.ToolError("no addon resolved; pass 'addon' (a name from the open_addon " +
+                                 "allowlist) or 'addonId'");
+        }
+
+        // List-item shortcut: index into a list component dispatches the item event directly.
+        if (indexArg is not null && nodeIdArg is null)
+        {
+            var index = indexArg.Value<int>();
+            var list = FindListByIndex(unit, index);
+            if (list is null)
+                return Json.ToolError($"no visible list component with item index {index} was " +
+                                      "found in this addon; list it with list_addon_elements");
+
+            var listNodeId = list->OwnerNode is not null ? list->OwnerNode->NodeId : 0;
+            list->SelectItem(index, true);
+
+            return new JObject
+            {
+                ["addon"] = unit->NameString,
+                ["addonId"] = (int)unit->Id,
+                ["listNodeId"] = (int)listNodeId,
+                ["index"] = index,
+                ["clicked"] = true,
+                ["via"] = "AtkComponentList.SelectItem",
+            };
+        }
+
+        if (nodeIdArg is null)
+            return Json.ToolError("nothing to click: pass 'nodeId' (from list_addon_elements) " +
+                                  "or 'index' (for list components)");
+
+        var nodeId = nodeIdArg.Value<uint>();
+        // Search the addon's UldManager node list first — it contains every top-level and
+        // nested node, whereas the RootNode child chain only exposes one linked child.
+        // Duplicate ids are common (per-row components reuse ids 2-7), so among all matches
+        // prefer a visible + clickable node; a bare Res/text match is the last resort.
+        var node = FindBestInUld(unit, nodeId, out var bestScore);
+        if (node is null || bestScore < 3)
+        {
+            var fromRoot = FindBestNode(unit->RootNode, nodeId, out var rootScore);
+            if (rootScore > bestScore)
+            {
+                node = fromRoot;
+                bestScore = rootScore;
+            }
+        }
+
+        if (node is null)
+            return Json.ToolError($"no node with id {nodeId} was found in this addon; list it " +
+                                  "with list_addon_elements");
+        if (!node->IsVisible())
+            return Json.ToolError($"node {nodeId} is not currently visible");
+
+        // ClickLib's proven dispatch shape (ClickBase.SendClick): ALWAYS dispatch through
+        // the ADDON's own vtable ReceiveEvent (vfunc[2]) with the addon as both receiver
+        // and evt.Listener — never the node's registered listener or the component. The
+        // addon's override routes the event to the right handler internally. The event's
+        // Target@0x8 is the clicked node; for component nodes ClickLib targets the
+        // component's OwnerNode (the component node itself), and the callback Param is
+        // what the game registered for that node (close buttons typically 0xFFFFFFFF with
+        // EventType.Change).
+        var sendType = eventType.Value;
+
+        // Explicit param override wins (ClickLib hardcodes 0xFFFFFFFF for close buttons
+        // where the auto-derived registered param may differ); otherwise read the param
+        // the game registered for this node/event.
+        uint eventParam;
+        if (paramArg is not null)
+        {
+            eventParam = unchecked((uint)paramArg.Value<long>());
+        }
+        else
+        {
+            eventParam = node->GetEventParam(eventType.Value);
+
+            // Read the node's registered event param if the generic probe returned 0 —
+            // close buttons are registered with 0xFFFFFFFF which GetEventParam may not surface.
+            for (var e = node->AtkEventManager.Event; e is not null; e = e->NextEvent)
+            {
+                if (eventParam == 0 && e->Param != 0)
+                    eventParam = e->Param;
+            }
+            if (eventParam == 0)
+                eventParam = 0xFFFFFFFF;
+        }
+
+        // For component nodes prefer the component's OwnerNode as the event target and the
+        // param registered on the component node (button callback ids live there).
+        var targetNode = (AtkResNode*)node;
+        if (IsComponentType(node))
+        {
+            var compNode = ComponentNodeOf(node);
+            if (compNode is not null && compNode->Component is not null &&
+                compNode->Component->OwnerNode is not null)
+            {
+                targetNode = (AtkResNode*)compNode->Component->OwnerNode;
+            }
+        }
+
+        var screenX = (short)(node->ScreenX + (node->Width / 2f));
+        var screenY = (short)(node->ScreenY + (node->Height / 2f));
+
+        // ClickLib passes a FULLY ZEROED arg5 — synthetic clicks carry no mouse data.
+
+        // ClickLib's SendClick, byte-for-byte: a zeroed 0x40 buffer with the target node
+        // at +0x8 and the addon at +0x10 — NOT a full AtkEvent (Param and State stay
+        // zero; the callback id travels only in the a3 argument). Buffer sizes larger
+        // than the managed AtkEvent struct matter for handlers that read past it.
+        byte* evtBuf = stackalloc byte[0x40];
+        for (var i = 0; i < 0x40; i++)
+            evtBuf[i] = 0;
+        *(AtkEventTarget**)&evtBuf[0x8] = (AtkEventTarget*)targetNode;
+        *(AtkEventListener**)&evtBuf[0x10] = (AtkEventListener*)unit;
+
+        // ClickLib passes a FULLY ZEROED 0x40-byte arg5 — synthetic clicks carry no mouse
+        // data. AtkEventData is smaller than 0x40, so a handler that reads past the managed
+        // struct would touch stack garbage; zero the full native-size buffer instead.
+        byte* eventDataBuf = stackalloc byte[0x40];
+        for (var i = 0; i < 0x40; i++)
+            eventDataBuf[i] = 0;
+
+        if (eventName == "registered")
+        {
+            // Genuine-mouse-click replication: fire every (type, param, listener) triple the
+            // node actually has registered — a real click routes through the node's event
+            // manager to ITS listeners (component buttons, lists, ...), which then fire the
+            // addon-level callback. Dispatching to the addon vtable only covers addons whose
+            // ReceiveEvent override switches on addon-level (type, param) pairs.
+            var fired = 0;
+            Span<byte> regSpan = stackalloc byte[0x40];
+            for (var e = node->AtkEventManager.Event; e is not null; e = e->NextEvent)
+            {
+                if (e->Listener is null)
+                    continue;
+                regSpan.Clear();
+                fixed (byte* regBuf = regSpan)
+                {
+                    *(AtkResNode**)&regBuf[0x0] = targetNode;
+                    *(AtkEventTarget**)&regBuf[0x8] = (AtkEventTarget*)targetNode;
+                    *(AtkEventListener**)&regBuf[0x10] = e->Listener;
+                    var listenerVtbl = (AtkEventListener.AtkEventListenerVirtualTable*)e->Listener->VirtualTable;
+                    listenerVtbl->ReceiveEvent(e->Listener, e->State.EventType, (int)e->Param, (AtkEvent*)regBuf, (AtkEventData*)eventDataBuf);
+                    fired++;
+                }
+            }
+
+            return new JObject
+            {
+                ["addon"] = unit->NameString,
+                ["addonId"] = (int)unit->Id,
+                ["nodeId"] = (int)nodeId,
+                ["nodeType"] = node->Type.ToString(),
+                ["event"] = "registered",
+                ["fired"] = fired,
+                ["screenX"] = (int)screenX,
+                ["screenY"] = (int)screenY,
+                ["clicked"] = fired > 0,
+                ["via"] = "registered listeners",
+            };
+        }
+
+        // Dispatch through the ADDON's vtable ReceiveEvent slot (offset 16, slot 2) —
+        // ClickLib's exact path. The addon's virtual override performs its own handler
+        // routing; dispatching to nested listeners bypasses it and drops the event.
+        var vtbl = (AtkEventListener.AtkEventListenerVirtualTable*)unit->VirtualTable;
+        vtbl->ReceiveEvent((AtkEventListener*)unit, sendType, (int)eventParam, (AtkEvent*)evtBuf, (AtkEventData*)eventDataBuf);
+
+        return new JObject
+        {
+            ["addon"] = unit->NameString,
+            ["addonId"] = (int)unit->Id,
+            ["nodeId"] = (int)nodeId,
+            ["nodeType"] = node->Type.ToString(),
+            ["event"] = sendType.ToString(),
+            ["eventParam"] = (int)eventParam,
+            ["screenX"] = (int)screenX,
+            ["screenY"] = (int)screenY,
+            ["clicked"] = true,
+            ["via"] = "addon vtable",
+        };
+    }
+
+    // ---------------------------------------------------------------- node helpers
+
+    /// <summary>
+    /// Resolves an AtkUnitBase either by allowlist name (through the agent layer's addon
+    /// names) or by raw addon id, via RaptureAtkUnitManager.
+    /// </summary>
+    private static unsafe AtkUnitBase* ResolveAddon(string? addonName, JToken? addonIdArg)
+    {
+        var manager = SafeRaptureAtkUnitManager();
+        if (manager is null)
+            return null;
+
+        if (addonIdArg is not null)
+        {
+            var id = addonIdArg.Value<int>();
+            if (id < 0 || id > ushort.MaxValue)
+                return null;
+            return manager->GetAddonById((ushort)id);
+        }
+
+        if (string.IsNullOrWhiteSpace(addonName))
+            return null;
+
+        // The client registers addons under their internal names ("CurrencyList",
+        // "_AddonExample", ...), which rarely equal the agent-allowlist keys, so resolve by
+        // scanning the loaded list for a case-insensitive name match. Direct GetAddonByName
+        // is tried first because it is the game's own lookup.
+        var byName = manager->GetAddonByName(addonName, 1);
+        if (byName is not null)
+            return byName;
+
+        var list = manager->AllLoadedUnitsList;
+        var entries = list.Entries;
+        for (var i = 0; i < entries.Length; i++)
+        {
+            var p = entries[i];
+            if (p.IsNull)
+                continue;
+            var unit = p.Value;
+            if (unit is null)
+                continue;
+            var name = unit->NameString;
+            if (string.Equals(name, addonName, StringComparison.OrdinalIgnoreCase) ||
+                name.Contains(addonName, StringComparison.OrdinalIgnoreCase))
+                return unit;
+        }
+
+        return null;
+    }
+
+    /// <summary>Best-effort snapshot of the loaded addon names for an error message.</summary>
+    private static unsafe string DescribeLoadedAddons(RaptureAtkUnitManager* manager)
+    {
+        var names = new List<string>();
+        TryCollectAddonNames(manager->AllLoadedUnitsList, names);
+        if (names.Count == 0)
+            TryCollectAddonNames(manager->FocusedUnitsList, names);
+
+        return names.Count > 0 ? $" Loaded addons include: {string.Join(", ", names)}." : " (No loaded addons were enumerable.)";
+    }
+
+    private static unsafe void TryCollectAddonNames(AtkUnitList list, List<string> names)
+    {
+        try
+        {
+            var entries = list.Entries;
+            foreach (var p in entries)
+            {
+                if (p.IsNull)
+                    continue;
+                try
+                {
+                    var unit = p.Value;
+                    if (unit is null)
+                        continue;
+                    var name = unit->NameString;
+                    if (!string.IsNullOrEmpty(name) && !names.Contains(name))
+                        names.Add(name);
+                    if (names.Count >= 30)
+                        return;
+                }
+                catch (Exception)
+                {
+                    // unreadable entry — skip it, keep collecting
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // unreadable list — nothing to add
+        }
+    }
+
+    /// <summary>Depth-first walk collecting clickable/labeled elements into <paramref name="elements"/>.</summary>
+    private static unsafe void WalkNode(
+        AtkResNode* node,
+        AtkUnitBase* unit,
+        int depth,
+        int maxDepth,
+        int maxNodes,
+        bool allNodes,
+        JArray elements,
+        ref bool truncated,
+        HashSet<nuint> visited)
+    {
+        if (node is null || truncated || depth > maxDepth)
+            return;
+        if (!visited.Add((nuint)node))
+            return;
+
+        var label = NodeLabel(node);
+        var clickable = NodeClickable(node);
+        if (allNodes || label is not null || clickable)
+        {
+            if (elements.Count >= maxNodes)
+            {
+                truncated = true;
+                return;
+            }
+
+            elements.Add(NodeJson(node, unit, label, clickable, depth));
+        }
+
+        WalkNode(node->ChildNode, unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+
+        // A component node's contents live on the component's UldManager node list (its
+        // AtkResNode* back-reference chains the component's own tree), not among the res-node
+        // children — descend so buttons/lists inside components are listed.
+        if (IsComponentType(node))
+        {
+            var compNode = ComponentNodeOf(node);
+            if (compNode is not null && compNode->Component is not null)
+            {
+                // The component's widget tree lives in its own UldManager node list; the
+                // AtkResNode back-reference is frequently null on live clients.
+                var compUld = compNode->Component->UldManager;
+                var compCount = Math.Min((int)compUld.NodeListCount, 512);
+                if (compCount > 0 && compUld.NodeList is not null)
+                {
+                    for (var i = 0; i < compCount && !truncated; i++)
+                        WalkNode(compUld.NodeList[i], unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+                }
+                else if (compNode->Component->AtkResNode is not null)
+                {
+                    WalkNode(compNode->Component->AtkResNode, unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+                }
+            }
+        }
+
+        WalkNode(node->NextSiblingNode, unit, depth, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+    }
+
+
+    private static unsafe JObject NodeJson(AtkResNode* node, AtkUnitBase* unit, string? label, bool clickable, int depth)
+    {
+        return new JObject
+        {
+            ["nodeId"] = (int)node->NodeId,
+            ["type"] = node->Type.ToString(),
+            ["depth"] = depth,
+            ["label"] = label,
+            ["x"] = (int)node->ScreenX,
+            ["y"] = (int)node->ScreenY,
+            ["width"] = (int)node->Width,
+            ["height"] = (int)node->Height,
+            ["visible"] = node->IsVisible(),
+            ["enabled"] = (node->NodeFlags & NodeFlags.Enabled) != 0,
+            ["clickable"] = clickable,
+        };
+    }
+
+    /// <summary>
+    /// Component nodes report combined runtime type values (observed 1004 on live clients)
+    /// rather than the bare 10000 enum constant, so component detection uses a >=1000 test.
+    /// </summary>
+    private static unsafe bool IsComponentType(AtkResNode* node) => (int)node->Type >= 1000;
+
+    /// <summary>
+    /// Casts a component node directly instead of via <c>GetAsAtkComponentNode</c>:
+    /// live clients report combined type values (e.g. 1004) that the helper's strict
+    /// enum check rejects, while the memory layout (AtkResNode at offset 0) is identical.
+    /// </summary>
+    private static unsafe AtkComponentNode* ComponentNodeOf(AtkResNode* node) =>
+        IsComponentType(node) ? (AtkComponentNode*)node : null;
+
+    /// <summary>Label text for text/button/list nodes; null when the node carries no text.</summary>
+    private static unsafe string? NodeLabel(AtkResNode* node)
+    {
+        try
+        {
+            if (node->Type == NodeType.Text)
+            {
+                var text = node->GetAsAtkTextNode();
+                var cp = text->GetText();
+                return cp.HasValue ? cp.ToString() : null;
+            }
+
+            if (IsComponentType(node))
+            {
+                var compNode = ComponentNodeOf(node);
+                var comp = compNode->Component;
+                if (comp is null)
+                    return null;
+
+                // Button: its own text node.
+                var button = compNode->GetAsAtkComponentButton();
+                if (button is not null && button->ButtonTextNode is not null)
+                {
+                    var cp = button->ButtonTextNode->GetText();
+                    var s = cp.HasValue ? cp.ToString() : null;
+                    if (!string.IsNullOrWhiteSpace(s))
+                        return s;
+                }
+
+                // List: first item labels, so the agent can see what's selectable.
+                var list = compNode->GetAsAtkComponentList();
+                if (list is not null)
+                {
+                    var items = new JArray();
+                    var count = Math.Min(list->GetItemCount(), 8);
+                    for (var i = 0; i < count; i++)
+                    {
+                        var cp = list->GetItemLabel(i);
+                        if (cp.HasValue)
+                            items.Add(cp.ToString());
+                    }
+
+                    return items.Count > 0 ? items.ToString(Newtonsoft.Json.Formatting.None) : null;
+                }
+
+                // Generic component: try the component's own text nodes by id 2.
+                var renderer = compNode->GetAsAtkComponentListItemRenderer();
+                if (renderer is not null)
+                {
+                    var tn = renderer->GetTextNodeById(2);
+                    var cp = tn is not null ? tn->GetText() : default;
+                    return cp is { HasValue: true } ? cp.ToString() : null;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether a node can plausibly receive click events.</summary>
+    private static unsafe bool NodeClickable(AtkResNode* node)
+    {
+        if (node->Type == NodeType.Collision)
+            return (node->NodeFlags & NodeFlags.RespondToMouse) != 0
+                   || node->IsEventRegistered(AtkEventType.MouseClick);
+
+        if (IsComponentType(node))
+        {
+            var compNode = ComponentNodeOf(node);
+            if (compNode is null || compNode->Component is null)
+                return false;
+
+            var kind = compNode->GetAsAtkComponentButton() is not null
+                       || compNode->GetAsAtkComponentCheckBox() is not null
+                       || compNode->GetAsAtkComponentList() is not null
+                       || compNode->GetAsAtkComponentTreeList() is not null
+                       || compNode->GetAsAtkComponentIconText() is not null
+                       || compNode->GetAsAtkComponentSlider() is not null
+                       || compNode->GetAsAtkComponentTextInput() is not null;
+            return kind || node->IsEventRegistered(AtkEventType.MouseClick);
+        }
+
+        return false;
+    }
+
+    /// <summary>Finds the first node with the given id in the addon's node tree.</summary>
+    private static unsafe AtkResNode* FindNode(AtkResNode* node, uint nodeId)
+    {
+        while (node is not null)
+        {
+            if (node->NodeId == nodeId)
+                return node;
+
+            var inChild = FindNode(node->ChildNode, nodeId);
+            if (inChild is not null)
+                return inChild;
+
+            node = node->NextSiblingNode;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Scores every node with <paramref name="nodeId"/> across the addon's UldManager node
+    /// list (visible +2, clickable +1) and returns the best match.
+    /// </summary>
+    private static unsafe AtkResNode* FindBestInUld(AtkUnitBase* unit, uint nodeId, out int bestScore)
+    {
+        AtkResNode* best = null;
+        bestScore = -1;
+        var uldCount = Math.Min((int)unit->UldManager.NodeListCount, 512);
+        for (var i = 0; i < uldCount; i++)
+        {
+            var candidate = FindBestNode(unit->UldManager.NodeList[i], nodeId, out var score);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
+
+            if (bestScore == 3)
+                break;
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Walks the tree rooted at <paramref name="root"/>, scoring every node with the given
+    /// id (visible +2, clickable +1) and keeping the best match. Duplicate ids are common
+    /// (per-row components reuse ids 2-7), so the highest-scoring match wins.
+    /// </summary>
+    private static unsafe AtkResNode* FindBestNode(AtkResNode* root, uint nodeId, out int bestScore)
+    {
+        AtkResNode* best = null;
+        var bestLocal = -1;
+
+        Visit(root);
+        bestScore = bestLocal;
+        return best;
+
+        // Local function (not lambda): lambdas capturing pointer locals are fine, but a
+        // recursive lambda needs an explicit delegate type; a local function needs none.
+        // bestScore is copied to bestLocal first: out params cannot be captured.
+        void Visit(AtkResNode* node)
+        {
+            while (node is not null)
+            {
+                if (node->NodeId == nodeId)
+                {
+                    var score = 0;
+                    if (node->IsVisible()) score += 2;
+                    if (NodeClickable(node)) score += 1;
+                    if (score > bestLocal)
+                    {
+                        bestLocal = score;
+                        best = node;
+                    }
+                }
+
+                Visit(node->ChildNode);
+                node = node->NextSiblingNode;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finds a visible list component whose item count exceeds <paramref name="index"/>,
+    /// so 'index' clicks land on the right list without the caller naming it.
+    /// </summary>
+    private static unsafe AtkComponentList* FindListByIndex(AtkUnitBase* unit, int index)
+    {
+        return FindListNode(unit->RootNode, index);
+
+        static unsafe AtkComponentList* FindListNode(AtkResNode* node, int index)
+        {
+            while (node is not null)
+            {
+                if (IsComponentType(node) && node->IsVisible())
+                {
+                    var compNode = ComponentNodeOf(node);
+                    var list = compNode->Component is null ? null : compNode->GetAsAtkComponentList();
+                    if (list is not null && index < list->GetItemCount())
+                        return list;
+                }
+
+                var inChild = FindListNode(node->ChildNode, index);
+                if (inChild is not null)
+                    return inChild;
+
+                node = node->NextSiblingNode;
+            }
+
+            return null;
+        }
+    }
+
+    private static int ClampInt(JToken? token, int min, int max, int fallback)
+    {
+        if (token is null)
+            return fallback;
+        try
+        {
+            var v = token.Value<int>();
+            return Math.Clamp(v, min, max);
+        }
+        catch (Exception)
+        {
+            return fallback;
+        }
+    }
+
+    private static unsafe RaptureAtkUnitManager* SafeRaptureAtkUnitManager()
+    {
+        try
+        {
+            return RaptureAtkUnitManager.Instance();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------- plumbing
