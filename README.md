@@ -7,7 +7,8 @@ server on a loopback port, so an AI agent can read live game state from a runnin
 inside the game process, so it can read the same memory the client itself uses: the object table, the local
 player, party and alliance, targets, FATEs, currency, Excel game data, and arbitrary validated raw memory
 through [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs). An MCP client connects to
-`http://127.0.0.1:18777/mcp` and calls 33 read-only tools. All 33 were verified against a live, logged-in
+`http://127.0.0.1:18777/mcp` and calls 36 tools — 33 read-only plus 3 UI tools (opt-in, mutating) that can
+open and close in-game addon windows. The 33 read-only tools were all verified against a live, logged-in
 client — see [Limitations](#limitations).
 
 ## Build
@@ -264,7 +265,7 @@ because a bad pointer would otherwise raise an access violation that kills the g
 reading address `0x1` and requiring a phrased refusal; that the assertion can be written at all is evidence the
 guard held.
 
-Every one of the 33 shipped tool schemas is validated from `tools/list` over the real socket: each
+Every one of the 36 shipped tool schemas is validated from `tools/list` over the real socket: each
 `inputSchema` must be a JSON object with an object `properties`, every property must carry a `type` that is one of
 JSON Schema's seven legal names, every `array` must say what its `items` are, and every name in `required` must
 actually be declared. That check was added because it immediately found a real defect: `read_pointer_chain`
@@ -322,18 +323,18 @@ tool error as `isError` rather than a transport failure, and keeps working after
 array-of-union schema (the shape that had the real defect) to parse, since that is exactly the kind of detail a
 client can choke on.
 
-The suite's fourth phase validates all 33 **shipped** schemas, not synthetic ones: `PluginLoadTest` dumps its
+The suite's fourth phase validates all 36 **shipped** schemas, not synthetic ones: `PluginLoadTest` dumps its
 `tools/list` payload when `DALAMUD_MCP_DUMP_TOOLS` is set, and that payload is run through the SDK's declared
 `ToolSchema` and then compiled against the JSON Schema 2020-12 meta-schema using the `ajv` bundled inside the SDK
-(33 schemas, 58 parameters, 12 required, 11 tools taking no arguments).
+(36 schemas — exact parameter totals below reflect the last full interop run and are re-measured on schema changes).
 
 Two things were learned by requiring the checks to be able to fail:
 
 **The official SDK's own tool-schema validation is too lenient to catch this project's defect.** Its `ToolSchema`
 types `inputSchema` as an object with a `type` of `"object"` and a `properties` record whose values are only
 checked to be *objects* — never that a property's `type` is one of JSON Schema's legal names. Re-injecting the
-original `{"type":"array of integer"}` defect into the real 33-tool payload still passed it. The label was
-therefore rewritten to say only what it proves (`the official SDK accepts all 33 shipped tool definitions as
+original `{"type":"array of integer"}` defect into the real 36-tool payload still passed it. The label was
+therefore rewritten to say only what it proves (`the official SDK accepts all 36 shipped tool definitions as
 tools/list output`), and the ajv meta-schema pass was added, which rejects it with an independent message:
 `type must be JSONType or JSONType[]: array of integer`.
 
@@ -458,9 +459,11 @@ are filtered out of `tools/list`, and `tools/call` rejects them with an explanat
 knows the name. Turning the setting on also changes the label from "read-only (recommended)" to a warning
 that "agents may change game state".
 
-**Note:** the gate is fully implemented and tested, but no mutating tool currently ships. All 33 registered
-tools are read-only, and there is no chat-command or input-injection tool. Enabling the setting today changes
-nothing about what the server exposes; it only arms the mechanism for tools added later.
+**Note:** the gate is fully implemented and tested, and the first mutating tools now ship behind it: the three
+UI tools (`open_addon`, `close_addon`, plus the read-only `get_addon_state`) can open and close in-game addon
+windows such as the inventory, armoury, or duty finder. `open_addon` and `close_addon` are flagged mutating, so
+they stay invisible in `tools/list` and reject `tools/call` until `AllowMutatingTools` is turned on; the rest of
+the tool set (33 tools) remains read-only, and there is still no chat-command or input-injection tool.
 
 ## Connect an agent
 
@@ -572,7 +575,8 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-33 tools, all read-only. Names are exactly as they appear in `tools/list`.
+36 tools: 33 read-only plus 3 UI tools (`open_addon` and `close_addon` are mutating and hidden until
+`AllowMutatingTools` is on; `get_addon_state` is read-only). Names are exactly as they appear in `tools/list`.
 
 ### Client and session
 
@@ -639,6 +643,19 @@ Both tools degrade the same way everywhere else in this plugin: if FFXIVClientSt
 not initialized (the plugin loaded before the game was ready) the tools return `{"available": false, ...}` with a
 reason, never a thrown exception.
 
+### UI (mutating, opt-in)
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `open_addon` | Opens an in-game addon/system window through `AgentInterface.Show()` on the agent that owns it — the same path the game's own UI uses. The addon must be named from a fixed allowlist of ~66 agents (inventory, armoury, emote list, quest journal, achievements, mount/minion notebooks, orchestrion, teleport, duty finder, gear sets, config, currency, retainer, free company, and more); unknown or non-openable names are rejected rather than guessed. | `addon` (required, enum of allowlisted names) |
+| `close_addon` | Closes one of the same allowlisted addon windows through `AgentInterface.Hide()`. Closing a window that is not open is a no-op, not an error. | `addon` (required, enum) |
+| `get_addon_state` | Read-only census: which of the allowlisted agents are currently active. Reports `active` and `inactive` name lists. | none |
+
+These are the plugin's first mutating tools: `open_addon` and `close_addon` are registered with the mutating
+flag, so they are filtered out of `tools/list` and rejected on `tools/call` while `AllowMutatingTools` is off
+(the default). Failures (agent module not initialized, agent not openable) return structured
+`{"available": false, "reason": ...}` instead of throwing, like the rest of the tool set.
+
 Valid `format` values for `read_memory` and `read_object_memory`: `hexdump`, `bytes`, `u8`, `u16`, `u32`,
 `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `string`, `utf16`, `pointer`.
 
@@ -648,8 +665,9 @@ integer precision past 2^53 and 64-bit pointers routinely exceed that. The parse
 
 ## Safety model
 
-**Read-only by default.** Every one of the 33 tools reads state; none writes it. The mutating gate exists and
-is enforced, but no tool is currently registered behind it.
+**Read-only by default.** 33 of the 36 tools read state; none writes it. The mutating gate is enforced, and the
+only tools registered behind it are the two UI tools that open and close addon windows — they stay invisible
+until `AllowMutatingTools` is turned on. There is still no chat-command or input-injection tool.
 
 **Loopback only.** The listener binds `IPAddress.Loopback` (`127.0.0.1`) directly with a `TcpListener`, not
 `HttpListener`. That avoids the HTTP.SYS URL-ACL requirement — no elevation and no `netsh` reservation is
@@ -718,7 +736,7 @@ evaluated per call rather than cached at startup.
 
 ## Limitations
 
-**In-game verification has been done — once, on this machine, with a live client.** All 33 tools were called
+**In-game verification has been done — once, on this machine, with a live client.** All 33 read-only tools were called
 over the real endpoint (`http://127.0.0.1:18777/mcp`) with FFXIV running and a character logged in, and every
 one returned real game data (or the correct "empty" answer for genuinely empty state — solo party, no FATEs,
 no targets, idle gauge). Highlights: `get_local_player` returned the live character (name, level 100, job,
@@ -756,10 +774,10 @@ What was verified before that session, and still stands:
   same constructor is then refused — so the result is a statement about Dalamud rather than about the harness.
   The offset audit re-derives every hand-copied FFXIVClientStructs offset from the installed library itself.
 - `tests\McpInterop` passes `12/12` protocol checks, `2/2` negative-control checks and `11/11` real-schema checks
-  with the **official** MCP SDK as the client — framing judged by somebody else's implementation, and all 33
+  with the **official** MCP SDK as the client — framing judged by somebody else's implementation, and all 36
   shipped schemas compiled against the JSON Schema 2020-12 meta-schema by the SDK's own `ajv`.
 - `tests\PluginLoadTest` passes `93/93` running the shipped `Plugin` constructor out of game: the real load
-  path executes, registers all 33 tools, binds the configured port, serves MCP over a real socket, validates every
+  path executes, registers all 36 tools, binds the configured port, serves MCP over a real socket, validates every
   shipped tool schema and cross-checks it against what the handlers demand, honours the
   request-log and bearer-token settings end to end, runs every `/dalamudmcp` subcommand against the live
   listener, reads **real game data** through a Reflection.Emit-built data manager backed by this machine's

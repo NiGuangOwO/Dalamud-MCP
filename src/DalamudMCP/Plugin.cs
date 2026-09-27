@@ -115,6 +115,7 @@ public sealed class Plugin : IDalamudPlugin
         DataTools.Register(registry, services);
         MemoryTools.Register(registry, services);
         StructTools.Register(registry, services);
+        UiTools.Register(registry, services);
 
         configWindow = new ConfigWindow(this);
         windowSystem.AddWindow(configWindow);

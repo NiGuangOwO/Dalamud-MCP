@@ -6,7 +6,8 @@
 服务器，让 AI Agent 能够从运行中的游戏客户端读取实时状态。插件运行在游戏进程内部，因此可以读取客户端
 自身使用的同一份内存：对象表、本地玩家、小队与联军、目标、FATE、货币、Excel 游戏数据，以及通过
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) 读取的任意经过校验的原始内存。MCP 客户端连接
-`http://127.0.0.1:18777/mcp` 即可调用 33 个只读工具。全部 33 个工具均已针对一个实时登录的客户端完成验证
+`http://127.0.0.1:18777/mcp` 即可调用 36 个工具 —— 33 个只读，外加 3 个 UI 工具（可选开启的可变更工具），
+用于打开和关闭游戏内的 addon 窗口。全部 33 个只读工具均已针对一个实时登录的客户端完成验证
 —— 见[局限](#局限)。
 
 ## 构建
@@ -229,7 +230,7 @@ token（`AuthToken`）和端口。前两项在插件构造之后设置到配置�
 这些字节。安全防护 —— 它存在的理由是坏指针本来会触发击杀整个游戏客户端的访问违例 —— 通过读取地址
 `0x1` 并要求得到一句有措辞的拒绝来检查；这条断言能写出来本身就是防护生效的证据。
 
-全部 33 个交付工具的 schema 都通过真实 socket 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型
+全部 36 个交付工具的 schema 都通过真实 socket 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型
 `properties` 的 JSON 对象，每个属性必须携带 JSON Schema 七个合法名之一的 `type`，每个 `array` 必须说明其
 `items`，`required` 里的每个名字都必须真的被声明。加这条检查是因为它立刻抓到了一个真实缺陷：
 `read_pointer_chain` 把它的 `offsets` 参数声明为
@@ -280,16 +281,16 @@ INTEROP OK
 往返一次工具调用、把工具错误作为 `isError` 接收而非传输失败，并且之后继续工作。它还被给了那个并集
 数组 schema（曾有真实缺陷的形状）去解析，因为这正是客户端可能呛住的细节类型。
 
-该套件的第四阶段校验全部 33 个**交付** schema，而不是合成的：`PluginLoadTest` 在设置了
+该套件的第四阶段校验全部 36 个**交付** schema，而不是合成的：`PluginLoadTest` 在设置了
 `DALAMUD_MCP_DUMP_TOOLS` 时导出它的 `tools/list` 载荷，该载荷经过 SDK 声明的 `ToolSchema`，再用 SDK 内置
-的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译（33 个 schema、58 个参数、12 个必需、11 个无参工具）。
+的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译（36 个 schema —— 参数总数以下一次完整 interop 运行的实测为准，schema 变更时会重新测量）。
 
 "要求检查必须能够失败"教会了我们两件事：
 
 **官方 SDK 自己的工具 schema 校验宽松到抓不住本项目的缺陷。** 它的 `ToolSchema` 把 `inputSchema` 类型定
 为带 `"object"` 型 `type` 与 `properties` 记录的对象，其值只被检查为*对象* —— 从不检查属性的 `type` 是否为
-JSON Schema 的合法名。把原始 `{"type":"array of integer"}` 缺陷重新注入真实的 33 工具载荷，它照样通过。
-因此标签被重写为只陈述它证明的内容（官方 SDK 接受全部 33 个交付工具定义为 tools/list 输出），并加入了
+JSON Schema 的合法名。把原始 `{"type":"array of integer"}` 缺陷重新注入真实的 36 工具载荷，它照样通过。
+因此标签被重写为只陈述它证明的内容（官方 SDK 接受全部 36 个交付工具定义为 tools/list 输出），并加入了
 ajv 元 schema 检查，它以一条独立的消息拒绝：`type must be JSONType or JSONType[]: array of integer`。
 
 **因错误原因而通过的阴性对照不是对照。** `negative.mjs` 把官方客户端指向一个刻意不符规的服务器并要求
@@ -395,9 +396,11 @@ sqpack 目录按以下顺序定位：`DALAMUD_MCP_SQPACK` 环境变量、四个�
 得到。闸门在两处强制：可变更工具被从 `tools/list` 过滤掉，即使客户端知道名字，`tools/call` 也会以解释性
 错误拒绝。打开设置还会把标签从"read-only (recommended)"换成"agents may change game state"警告。
 
-**注意：** 闸门已完整实现并测试，但目前没有任何可变更工具交付。全部 33 个注册工具都是只读的，没有
-聊天命令或输入注入工具。今天打开该设置不会改变服务器暴露的任何东西；它只是为以后加入的工具预先
-武装了机制。
+**注意：** 闸门已完整实现并测试，现在第一批可变更工具已在它之后交付：三个 UI 工具（`open_addon`、
+`close_addon`，外加只读的 `get_addon_state`）可以打开和关闭游戏内的 addon 窗口，例如背包、军械库或
+任务搜索器。`open_addon` 与 `close_addon` 被标记为可变更，因此在 `AllowMutatingTools` 打开之前，它们在
+`tools/list` 中不可见、`tools/call` 会拒绝；其余工具集（33 个工具）仍然只读，也依旧没有聊天命令或输入
+注入工具。
 
 ## 连接 Agent
 
@@ -501,7 +504,8 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-33 个工具，全部只读。名称与 `tools/list` 中完全一致。
+36 个工具：33 个只读，外加 3 个 UI 工具（`open_addon` 与 `close_addon` 是可变更工具，在
+`AllowMutatingTools` 打开前隐藏；`get_addon_state` 只读）。名称与 `tools/list` 中完全一致。
 
 ### 客户端与会话
 
@@ -567,6 +571,18 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 这两个工具在本插件其他任何地方都以同样方式降级：若 FFXIVClientStructs 的静态地址解析器尚未初始化
 （插件在游戏就绪前加载），工具返回 `{"available": false, ...}` 及原因，绝不抛异常。
 
+### UI（可变更，需 opt-in）
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `open_addon` | 通过拥有该窗口的 agent 的 `AgentInterface.Show()` 打开一个游戏内 addon/系统窗口 —— 与游戏自身 UI 走同一条路径。addon 名称必须来自约 66 个已验证 agent 的固定允许列表（背包、军械库、情感动作列表、任务日志、成就、坐骑/宠物图鉴、乐团演奏乐谱、传送、任务搜索器、套装、系统设置、货币、雇员、部队等）；未知或不可打开的名称会被拒绝而不是猜测。 | `addon`（必填，允许列表枚举） |
+| `close_addon` | 通过 `AgentInterface.Hide()` 关闭同一个允许列表中的 addon 窗口。关闭本就未打开的窗口是无操作而非错误。 | `addon`（必填，枚举） |
+| `get_addon_state` | 只读普查：允许列表中哪些 agent 当前处于活动状态。报告 `active` 与 `inactive` 名称列表。 | 无 |
+
+这些是本插件第一批可变更工具：`open_addon` 与 `close_addon` 以可变更标志注册，因此在 `AllowMutatingTools`
+关闭（默认）时，它们会从 `tools/list` 中被过滤、`tools/call` 会拒绝。失败（agent 模块未初始化、agent 不可
+打开）像工具集其余部分一样返回结构化 `{"available": false, "reason": ...}` 而不是抛异常。
+
 `read_memory` 与 `read_object_memory` 的合法 `format` 值：`hexdump`、`bytes`、`u8`、`u16`、`u32`、`u64`、
 `i8`、`i16`、`i32`、`i64`、`f32`、`f64`、`bool`、`string`、`utf16`、`pointer`。
 
@@ -575,8 +591,9 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 安全模型
 
-**默认只读。** 33 个工具全部只读状态；没有一个写入。可变更闸门存在且被强制，但目前没有任何工具注册
-在它后面。
+**默认只读。** 36 个工具中的 33 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的只有打开和
+关闭 addon 窗口的两个 UI 工具 —— 在 `AllowMutatingTools` 打开前它们不可见。依旧没有聊天命令或输入注入
+工具。
 
 **仅回环。** 监听器直接以 `TcpListener` 绑定 `IPAddress.Loopback`（`127.0.0.1`），而非 `HttpListener`。这
 避免了 HTTP.SYS 的 URL-ACL 要求 —— 无需提权或 `netsh` 预留 —— 也意味着服务器永远无法从网络访问。不要
@@ -639,7 +656,7 @@ MCP 客户端
 
 ## 局限
 
-**游戏内验证已完成 —— 一次，在这台机器上，用实时客户端。** 全部 33 个工具都在 FFXIV 运行且角色登录的
+**游戏内验证已完成 —— 一次，在这台机器上，用实时客户端。** 全部 33 个只读工具都在 FFXIV 运行且角色登录的
 状态下通过真实端点（`http://127.0.0.1:18777/mcp`）调用过，每一个都返回了真实游戏数据（或对真正为空的
 状态返回了正确的"空"答案 —— 单人小队、无 FATE、无目标、空闲量表）。亮点：`get_local_player` 返回了
 实时角色（名称、100 级、职业、HP/MP、世界、位置）；`get_game_objects` 枚举了玩家、一只宠物和训练木桩
@@ -672,10 +689,10 @@ MCP 客户端
   单例键并断言同一构造函数随后被拒绝 —— 所以结论是关于 Dalamud 的，而不是关于测试装置的。偏移审计
   从已安装的库本身重新推导每个手工抄录的 FFXIVClientStructs 偏移。
 - `tests\McpInterop` 以**官方** MCP SDK 为客户端通过 `12/12` 协议检查、`2/2` 阴性对照检查与 `11/11`
-  真实 schema 检查 —— 组帧由别人的实现裁决，全部 33 个交付 schema 由 SDK 自带的 `ajv` 对照 JSON Schema
+  真实 schema 检查 —— 组帧由别人的实现裁决，全部 36 个交付 schema 由 SDK 自带的 `ajv` 对照 JSON Schema
   2020-12 元 schema 编译。
 - `tests\PluginLoadTest` 在游戏外运行交付的 `Plugin` 构造函数通过 `93/93`：真实加载路径执行、注册全部
-  33 个工具、绑定配置端口、在真实 socket 上服务 MCP、校验每个交付工具 schema 并与处理器实际索求交叉
+  36 个工具、绑定配置端口、在真实 socket 上服务 MCP、校验每个交付工具 schema 并与处理器实际索求交叉
   核对、端到端遵守请求日志与 bearer token 设置、对存活监听器运行每个 `/dalamudmcp` 子命令、通过由本机
   已安装 `sqpack` 文件支撑的 Reflection.Emit 构建的数据管理器读取**真实游戏数据**（物品 1 解析为金币）、
   在自己进程内读取并验证**真实内存**，以及干净卸载。

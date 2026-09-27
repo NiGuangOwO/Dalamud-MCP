@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -334,7 +334,7 @@ internal static class Program
             ? new List<string>()
             : tools.Cast<object>().Select(t => Prop(t, "Name") as string ?? string.Empty).ToList();
 
-        Check("all 33 tools were registered", toolNames.Count == 33, $"found {toolNames.Count}");
+        Check("all 36 tools were registered", toolNames.Count == 36, $"found {toolNames.Count}");
         Check("tool names are unique", toolNames.Distinct(StringComparer.Ordinal).Count() == toolNames.Count);
         Check("registry exposes get_conditions", toolNames.Contains("get_conditions"));
         Check("registry exposes read_memory", toolNames.Contains("read_memory"));
@@ -377,7 +377,7 @@ internal static class Program
 
             var listText = await CallAsync(http, baseUrl, sessionId, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}").ConfigureAwait(false);
             var listed = CountToolEntries(listText);
-            Check("tools/list returns 33 tools over the real socket", listed == 33, $"found {listed}");
+            Check("tools/list returns 36 tools over the real socket", listed == 36, $"found {listed}");
 
             var callText = await CallAsync(
                 http, baseUrl, sessionId,
@@ -861,7 +861,7 @@ internal static class Program
             && statusLine.Contains(port.ToString(), StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
         Check("the status subcommand reports the tool count",
-            statusLine is not null && statusLine.Contains("33 tools", StringComparison.Ordinal),
+            statusLine is not null && statusLine.Contains("36 tools", StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
 
         // 'stop' followed by 'start' must take the port down and bring it back - the two paths a
