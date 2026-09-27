@@ -6,7 +6,7 @@
 服务器，让 AI Agent 能够从运行中的游戏客户端读取实时状态。插件运行在游戏进程内部，因此可以读取客户端
 自身使用的同一份内存：对象表、本地玩家、小队与联军、目标、FATE、货币、Excel 游戏数据，以及通过
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) 读取的任意经过校验的原始内存。MCP 客户端连接
-`http://127.0.0.1:18777/mcp` 即可调用 36 个工具 —— 33 个只读，外加 3 个 UI 工具（可选开启的可变更工具），
+`http://127.0.0.1:18777/mcp` 即可调用 42 个工具 —— 33 个只读，外加 9 个 UI 工具（可选开启的可变更工具），
 用于打开和关闭游戏内的 addon 窗口。全部 33 个只读工具均已针对一个实时登录的客户端完成验证
 —— 见[局限](#局限)。
 
@@ -230,7 +230,7 @@ token（`AuthToken`）和端口。前两项在插件构造之后设置到配置�
 这些字节。安全防护 —— 它存在的理由是坏指针本来会触发击杀整个游戏客户端的访问违例 —— 通过读取地址
 `0x1` 并要求得到一句有措辞的拒绝来检查；这条断言能写出来本身就是防护生效的证据。
 
-全部 36 个交付工具的 schema 都通过真实 socket 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型
+全部 42 个交付工具的 schema 都通过真实 socket 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型
 `properties` 的 JSON 对象，每个属性必须携带 JSON Schema 七个合法名之一的 `type`，每个 `array` 必须说明其
 `items`，`required` 里的每个名字都必须真的被声明。加这条检查是因为它立刻抓到了一个真实缺陷：
 `read_pointer_chain` 把它的 `offsets` 参数声明为
@@ -281,16 +281,16 @@ INTEROP OK
 往返一次工具调用、把工具错误作为 `isError` 接收而非传输失败，并且之后继续工作。它还被给了那个并集
 数组 schema（曾有真实缺陷的形状）去解析，因为这正是客户端可能呛住的细节类型。
 
-该套件的第四阶段校验全部 36 个**交付** schema，而不是合成的：`PluginLoadTest` 在设置了
+该套件的第四阶段校验全部 42 个**交付** schema，而不是合成的：`PluginLoadTest` 在设置了
 `DALAMUD_MCP_DUMP_TOOLS` 时导出它的 `tools/list` 载荷，该载荷经过 SDK 声明的 `ToolSchema`，再用 SDK 内置
-的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译（36 个 schema —— 参数总数以下一次完整 interop 运行的实测为准，schema 变更时会重新测量）。
+的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译（42 个 schema —— 参数总数以下一次完整 interop 运行的实测为准，schema 变更时会重新测量）。
 
 "要求检查必须能够失败"教会了我们两件事：
 
 **官方 SDK 自己的工具 schema 校验宽松到抓不住本项目的缺陷。** 它的 `ToolSchema` 把 `inputSchema` 类型定
 为带 `"object"` 型 `type` 与 `properties` 记录的对象，其值只被检查为*对象* —— 从不检查属性的 `type` 是否为
-JSON Schema 的合法名。把原始 `{"type":"array of integer"}` 缺陷重新注入真实的 36 工具载荷，它照样通过。
-因此标签被重写为只陈述它证明的内容（官方 SDK 接受全部 36 个交付工具定义为 tools/list 输出），并加入了
+JSON Schema 的合法名。把原始 `{"type":"array of integer"}` 缺陷重新注入真实的 42 工具载荷，它照样通过。
+因此标签被重写为只陈述它证明的内容（官方 SDK 接受全部 42 个交付工具定义为 tools/list 输出），并加入了
 ajv 元 schema 检查，它以一条独立的消息拒绝：`type must be JSONType or JSONType[]: array of integer`。
 
 **因错误原因而通过的阴性对照不是对照。** `negative.mjs` 把官方客户端指向一个刻意不符规的服务器并要求
@@ -504,8 +504,8 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-36 个工具：33 个只读，外加 3 个 UI 工具（`open_addon` 与 `close_addon` 是可变更工具，在
-`AllowMutatingTools` 打开前隐藏；`get_addon_state` 只读）。名称与 `tools/list` 中完全一致。
+42 个工具：33 个只读，外加 9 个 UI 工具（`open_addon`、`close_addon`、`click_addon_element` 与三个 `probe_*` 启用/禁用工具是可变更工具，在
+`AllowMutatingTools` 打开前隐藏；`get_addon_state`、`list_addon_elements`、`probe_receive_event_dump` 只读）。名称与 `tools/list` 中完全一致。
 
 ### 客户端与会话
 
@@ -575,9 +575,15 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 | 工具 | 描述 | 关键参数 |
 | --- | --- | --- |
-| `open_addon` | 通过拥有该窗口的 agent 的 `AgentInterface.Show()` 打开一个游戏内 addon/系统窗口 —— 与游戏自身 UI 走同一条路径。addon 名称必须来自约 66 个已验证 agent 的固定允许列表（背包、军械库、情感动作列表、任务日志、成就、坐骑/宠物图鉴、乐团演奏乐谱、传送、任务搜索器、套装、系统设置、货币、雇员、部队等）；未知或不可打开的名称会被拒绝而不是猜测。 | `addon`（必填，允许列表枚举） |
+| `open_addon` | 通过拥有该窗口的 agent 的 `AgentInterface.Show()` 打开一个游戏内 addon/系统窗口 —— 与游戏自身 UI 走同一条路径。addon 名称必须来自约 66 个已验证 agent 的固定允许列表（背包、军械库、情感动作列表、任务日志、成就、坐骑/宠物图鉴、乐团演奏乐谱、传送、任务搜索器、套装、系统设置、货币、雇员、部队等）；未知或不可打开的名称会被拒绝而不是猜测。新创建的窗口在游戏刷新它之前会忽略合成点击，因此 `open_addon` 还会在约 1.2 秒后调度第二次 `Show()`（实测修复）。 | `addon`（必填，允许列表枚举） |
 | `close_addon` | 通过 `AgentInterface.Hide()` 关闭同一个允许列表中的 addon 窗口。关闭本就未打开的窗口是无操作而非错误。 | `addon`（必填，枚举） |
 | `get_addon_state` | 只读普查：允许列表中哪些 agent 当前处于活动状态。报告 `active` 与 `inactive` 名称列表。 | 无 |
+| `list_addon_elements` | 遍历一个已加载 addon 的节点树（从根节点 DFS），报告每个节点的 id、类型、标签、尺寸、屏幕位置与是否可点击 —— UI 自动化的发现半边。组件节点（按钮、列表、下拉）报告其运行时组合类型。 | `addon` 或 `addonId`、`maxDepth`（默认 12）、`maxNodes`（默认 100） |
+| `click_addon_element` | 通过 addon 自身的 `ReceiveEvent` 向已加载 addon 内的一个节点派发一个 Atk UI 事件 —— 与真实输入管线走同一条派发路径。事件类型：`click`（MouseClick）、`doubleClick`、`buttonClick`（ButtonClick 25）、`buttonPress`（23）、`buttonRelease`（24）、`registered`（触发该节点注册的每个处理器）。真实点击是一次 press+release 对，因此关闭窗口就是先 `buttonPress` 再 `buttonRelease`。 | `addon` 或 `addonId`、`nodeId` 或 `index`、`event`、`param`（高级覆盖） |
+| `probe_receive_event_enable` | 诊断：交换一个已加载 addon 的 `ReceiveEvent` vtable 槽，使它收到的每个 UI 事件 —— 真实的或合成的 —— 在被转发前先被捕获。配合 `probe_receive_event_dump` 对比真实点击与 `click_addon_element` 派发内容的差异。 | `addon` 或 `addonId` |
+| `probe_receive_event_enable_listener` | 同样的捕获，但 hook 的是特定节点的第一个注册监听器而非 addon 本身（真实组件点击落在节点注册的监听器上）。 | `addon` 或 `addonId`、`nodeId`（必填） |
+| `probe_receive_event_disable` | 恢复被 hook 的 vtable 槽。 | 无 |
+| `probe_receive_event_dump` | 返回捕获到的每个 `ReceiveEvent` 调用：事件类型、param，以及按 FCS 偏移解码的原始事件/事件数据缓冲区。只读。 | 无 |
 
 这些是本插件第一批可变更工具：`open_addon` 与 `close_addon` 以可变更标志注册，因此在 `AllowMutatingTools`
 关闭（默认）时，它们会从 `tools/list` 中被过滤、`tools/call` 会拒绝。失败（agent 模块未初始化、agent 不可
@@ -588,6 +594,10 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 每个 agent 的窗口显示时都翻转 —— 窗口可以肉眼可见地开着而其 agent 仍报告未激活。该普查只是提示，不是
 事实基准；可靠的操作是 `open_addon`/`close_addon`。
 
+点击派发同样经过实测：对货币窗口关闭碰撞节点发送合成的 `buttonPress`+`buttonRelease` 对能关闭窗口，
+且 probe 工具确认了真实鼠标点击到达的接收者与 addon 的 vtable 不同（组件注册的监听器）——这正是
+`registered` 事件模式与监听器级 probe 存在的原因。
+
 `read_memory` 与 `read_object_memory` 的合法 `format` 值：`hexdump`、`bytes`、`u8`、`u16`、`u32`、`u64`、
 `i8`、`i16`、`i32`、`i64`、`f32`、`f64`、`bool`、`string`、`utf16`、`pointer`。
 
@@ -596,7 +606,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 安全模型
 
-**默认只读。** 36 个工具中的 33 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的只有打开和
+**默认只读。** 42 个工具中的 33 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的只有打开和
 关闭 addon 窗口的两个 UI 工具 —— 在 `AllowMutatingTools` 打开前它们不可见。依旧没有聊天命令或输入注入
 工具。
 
@@ -694,10 +704,10 @@ MCP 客户端
   单例键并断言同一构造函数随后被拒绝 —— 所以结论是关于 Dalamud 的，而不是关于测试装置的。偏移审计
   从已安装的库本身重新推导每个手工抄录的 FFXIVClientStructs 偏移。
 - `tests\McpInterop` 以**官方** MCP SDK 为客户端通过 `12/12` 协议检查、`2/2` 阴性对照检查与 `11/11`
-  真实 schema 检查 —— 组帧由别人的实现裁决，全部 36 个交付 schema 由 SDK 自带的 `ajv` 对照 JSON Schema
+  真实 schema 检查 —— 组帧由别人的实现裁决，全部 42 个交付 schema 由 SDK 自带的 `ajv` 对照 JSON Schema
   2020-12 元 schema 编译。
 - `tests\PluginLoadTest` 在游戏外运行交付的 `Plugin` 构造函数通过 `93/93`：真实加载路径执行、注册全部
-  36 个工具、绑定配置端口、在真实 socket 上服务 MCP、校验每个交付工具 schema 并与处理器实际索求交叉
+  42 个工具、绑定配置端口、在真实 socket 上服务 MCP、校验每个交付工具 schema 并与处理器实际索求交叉
   核对、端到端遵守请求日志与 bearer token 设置、对存活监听器运行每个 `/dalamudmcp` 子命令、通过由本机
   已安装 `sqpack` 文件支撑的 Reflection.Emit 构建的数据管理器读取**真实游戏数据**（物品 1 解析为金币）、
   在自己进程内读取并验证**真实内存**，以及干净卸载。

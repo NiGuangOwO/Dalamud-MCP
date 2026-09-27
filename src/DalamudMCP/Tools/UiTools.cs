@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using DalamudMCP.Mcp;
 using FFXIVClientStructs.FFXIV.Client.System.String;
@@ -112,6 +113,7 @@ internal static class UiTools
 
     public static void Register(ToolRegistry registry, GameServices svc)
     {
+        services = svc;
         var names = OpenableAgents.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray();
 
         registry.Add(
@@ -184,7 +186,7 @@ internal static class UiTools
                 ("addonId", "integer", "Raw AtkUnitBase id of the addon to click inside (overrides addon)", false),
                 ("nodeId", "integer", "Target node id from list_addon_elements", false),
                 ("index", "integer", "For list components: the item index to click instead of a nodeId", false),
-                ("event", "string", "Which event to dispatch: click (default), doubleClick, buttonClick, or 'registered' to fire every handler the node has registered (closest to a real mouse click)", false),
+                ("event", "string", "Which event to dispatch: click (default), doubleClick, buttonClick, buttonPress, buttonRelease, or 'registered' to fire every handler the node has registered (closest to a real mouse click)", false),
                 ("param", "integer", "Override the event callback param (uint32). Advanced: the game normally derives it from the node's registered handler; ClickLib-style close buttons need 0xFFFFFFFF (-1)", false)),
             args => ClickAddonElement(args),
             mutating: true);
@@ -214,6 +216,21 @@ internal static class UiTools
             mutating: true);
 
         registry.Add(
+            "probe_receive_event_enable_listener",
+            "Hook one node's registered listener ReceiveEvent (diagnostic)",
+            "Resolves the addon and node, then hooks the node's FIRST registered listener's " +
+            "ReceiveEvent vtable slot. Real component clicks land on node-registered listeners " +
+            "rather than the addon's own slot, so this captures what a real click delivers. " +
+            "Pass 'addon' (raw loaded addon name) or 'addonId', plus 'nodeId'. Use " +
+            "probe_receive_event_dump to read captures. Mutating.",
+            Json.Schema(
+                ("addon", "string", "Addon name to hook (raw loaded addon name, e.g. Currency)", false),
+                ("addonId", "integer", "Raw AtkUnitBase id of the addon to hook (overrides addon)", false),
+                ("nodeId", "integer", "Node whose first registered listener should be hooked", true)),
+            args => ProbeEnableListener(args),
+            mutating: true);
+
+        registry.Add(
             "probe_receive_event_dump",
             "Dump captured ReceiveEvent calls (diagnostic)",
             "Returns every ReceiveEvent invocation captured since the hook was enabled: event " +
@@ -231,6 +248,44 @@ internal static class UiTools
         return AtkEventProbe.Enable(unit);
     }
 
+    /// <summary>Hook a specific node's first registered listener. Resolves the addon +
+    /// node, walks the node's AtkEventManager event chain, and hooks the FIRST listener
+    /// found there (that listener's own vtable slot). Real component clicks land here,
+    /// not on the addon's vtable slot.</summary>
+    private static unsafe object ProbeEnableListener(JObject args)
+    {
+        var unit = ResolveAddon(args["addon"]?.Value<string>(), args["addonId"]);
+        if (unit is null)
+            return Json.ToolError("no addon resolved for probe_receive_event_enable_listener");
+
+        var nodeId = args["nodeId"]?.Value<int?>();
+        if (nodeId is null)
+            return Json.ToolError("missing required parameter: nodeId");
+
+        var node = FindBestInUld(unit, (uint)nodeId.Value, out var bestScore);
+        if (node is null || bestScore < 3)
+        {
+            var fromRoot = FindBestNode(unit->RootNode, (uint)nodeId.Value, out var rootScore);
+            if (rootScore > bestScore)
+            {
+                node = fromRoot;
+                bestScore = rootScore;
+            }
+        }
+        if (node is null)
+            return Json.ToolError($"no node with id {nodeId} was found in this addon");
+
+        var em = &node->AtkEventManager;
+        if (em->Event is null)
+            return Json.ToolError($"node {nodeId} has no registered listeners");
+
+        var listener = em->Event->Listener;
+        if (listener is null)
+            return Json.ToolError($"node {nodeId}'s first registered event has a null listener");
+
+        return AtkEventProbe.EnableListener(unit, listener);
+    }
+
     // ---------------------------------------------------------------- handlers
 
     private static unsafe object OpenAddon(JObject args)
@@ -245,6 +300,10 @@ internal static class UiTools
         return WithAgent(agentId, addon, agent =>
         {
             agent->Show();
+            // A freshly created addon instance ignores synthetic clicks until the game
+            // has refreshed it once; a second Show() after a short delay restores click
+            // responsiveness (live-verified alternating open/click pattern).
+            ScheduleReshow(agentId, 1200);
             return new JObject
             {
                 ["addon"] = addon,
@@ -252,6 +311,41 @@ internal static class UiTools
                 ["opened"] = true,
             };
         });
+    }
+
+    /// <summary>Show() an agent a second time. Live-verified quirk: a freshly-created addon
+    /// instance's event dispatch is not ready after the first Show() — synthetic clicks sent
+    /// to it are silently ignored (reliably reproducible alternating open/click pattern on
+    /// the Currency addon). A second Show() one-plus game-frame later restores click
+    /// responsiveness, so OpenAddon schedules a delayed re-Show() fire-and-forget.</summary>
+    private static GameServices? services;
+
+    private static void ScheduleReshow(AgentId agentId, int delayMs)
+    {
+        var svc = services;
+        if (svc is null)
+            return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delayMs).ConfigureAwait(false);
+                await svc.Framework.RunOnFrameworkThread(() => ReshowAgent(agentId)).ConfigureAwait(false);
+            }
+            catch
+            {
+                // fire-and-forget: a failed re-Show only means the click-readiness
+                // quirk may resurface; never take the server down for it.
+            }
+        });
+    }
+
+    private static unsafe void ReshowAgent(AgentId agentId)
+    {
+        var mgr = SafeAgentModule();
+        var a = mgr is not null ? SafeAgent(mgr, agentId) : null;
+        if (a is not null)
+            a->Show();
     }
 
     private static unsafe object CloseAddon(JObject args)
@@ -389,11 +483,13 @@ internal static class UiTools
             null or "" or "click" => AtkEventType.MouseClick,
             "doubleClick" => AtkEventType.MouseDoubleClick,
             "buttonClick" => AtkEventType.ButtonClick,
+            "buttonPress" => AtkEventType.ButtonPress,
+            "buttonRelease" => AtkEventType.ButtonRelease,
             "registered" => AtkEventType.MouseClick, // event itself ignored; every registered handler fires
             _ => null,
         };
         if (eventType is null)
-            return Json.ToolError($"unknown event '{eventName}'; use click, doubleClick or buttonClick");
+            return Json.ToolError($"unknown event '{eventName}'; use click, doubleClick, buttonClick, buttonPress or buttonRelease");
 
         var unit = ResolveAddon(addonName, addonIdArg);
         if (unit is null)
@@ -516,6 +612,10 @@ internal static class UiTools
         byte* evtBuf = stackalloc byte[0x40];
         for (var i = 0; i < 0x40; i++)
             evtBuf[i] = 0;
+        // CN client 7.x: the addon's ReceiveEvent dereferences evt->Node (a synthetic event
+        // with a null Node crashed the game in live testing), so fill Node@0x0 as well —
+        // not just Target@0x8 / Listener@0x10 as ClickLib's older intl-client layout did.
+        *(AtkResNode**)&evtBuf[0x0] = targetNode;
         *(AtkEventTarget**)&evtBuf[0x8] = (AtkEventTarget*)targetNode;
         *(AtkEventListener**)&evtBuf[0x10] = (AtkEventListener*)unit;
 

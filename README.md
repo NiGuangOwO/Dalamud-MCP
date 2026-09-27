@@ -7,7 +7,7 @@ server on a loopback port, so an AI agent can read live game state from a runnin
 inside the game process, so it can read the same memory the client itself uses: the object table, the local
 player, party and alliance, targets, FATEs, currency, Excel game data, and arbitrary validated raw memory
 through [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs). An MCP client connects to
-`http://127.0.0.1:18777/mcp` and calls 36 tools — 33 read-only plus 3 UI tools (opt-in, mutating) that can
+`http://127.0.0.1:18777/mcp` and calls 42 tools — 33 read-only plus 9 UI tools (opt-in, mutating) that can
 open and close in-game addon windows. The 33 read-only tools were all verified against a live, logged-in
 client — see [Limitations](#limitations).
 
@@ -575,7 +575,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-36 tools: 33 read-only plus 3 UI tools (`open_addon` and `close_addon` are mutating and hidden until
+42 tools: 33 read-only plus 9 UI tools (`open_addon`, `close_addon`, `click_addon_element`, and the three `probe_*` enable/disable tools are mutating and hidden until
 `AllowMutatingTools` is on; `get_addon_state` is read-only). Names are exactly as they appear in `tools/list`.
 
 ### Client and session
@@ -647,9 +647,15 @@ reason, never a thrown exception.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `open_addon` | Opens an in-game addon/system window through `AgentInterface.Show()` on the agent that owns it — the same path the game's own UI uses. The addon must be named from a fixed allowlist of ~66 agents (inventory, armoury, emote list, quest journal, achievements, mount/minion notebooks, orchestrion, teleport, duty finder, gear sets, config, currency, retainer, free company, and more); unknown or non-openable names are rejected rather than guessed. | `addon` (required, enum of allowlisted names) |
+| `open_addon` | Opens an in-game addon/system window through `AgentInterface.Show()` on the agent that owns it — the same path the game's own UI uses. The addon must be named from a fixed allowlist of ~66 agents (inventory, armoury, emote list, quest journal, achievements, mount/minion notebooks, orchestrion, teleport, duty finder, gear sets, config, currency, retainer, free company, and more); unknown or non-openable names are rejected rather than guessed. A freshly created window ignores synthetic clicks until the game refreshes it, so `open_addon` also schedules a second `Show()` ~1.2 s later (live-verified fix). | `addon` (required, enum of allowlisted names) |
 | `close_addon` | Closes one of the same allowlisted addon windows through `AgentInterface.Hide()`. Closing a window that is not open is a no-op, not an error. | `addon` (required, enum) |
 | `get_addon_state` | Read-only census: which of the allowlisted agents are currently active. Reports `active` and `inactive` name lists. | none |
+| `list_addon_elements` | Walks a loaded addon's node tree (DFS from its root node) and reports each node's id, type, label, size, screen position, and whether it is clickable — the discovery half of UI automation. Component nodes (buttons, lists, drop-downs) report their runtime composite type. | `addon` or `addonId`, `maxDepth` (default 12), `maxNodes` (default 100) |
+| `click_addon_element` | Dispatches one Atk UI event to a node inside a loaded addon through the addon's own `ReceiveEvent` — the same dispatch the real input pipeline feeds. Event types: `click` (MouseClick), `doubleClick`, `buttonClick` (ButtonClick 25), `buttonPress` (23), `buttonRelease` (24), or `registered` (fires every handler the node has registered). A real click is a press+release pair, so closing a window is `buttonPress` followed by `buttonRelease`. | `addon` or `addonId`, `nodeId` or `index`, `event`, `param` (advanced override) |
+| `probe_receive_event_enable` | Diagnostic: swaps one loaded addon's `ReceiveEvent` vtable slot so every UI event it receives — real or synthetic — is captured before being forwarded. Use with `probe_receive_event_dump` to compare what a real click delivers versus what `click_addon_element` sends. | `addon` or `addonId` |
+| `probe_receive_event_enable_listener` | Same capture, but hooks a specific node's first registered listener instead of the addon itself (real component clicks land on node-registered listeners). | `addon` or `addonId`, `nodeId` (required) |
+| `probe_receive_event_disable` | Restores the hooked vtable slot. | none |
+| `probe_receive_event_dump` | Returns every captured `ReceiveEvent` call: event type, param, and the raw event/event-data buffers decoded at their FCS offsets. Read-only. | none |
 
 These are the plugin's first mutating tools: `open_addon` and `close_addon` are registered with the mutating
 flag, so they are filtered out of `tools/list` and rejected on `tools/call` while `AllowMutatingTools` is off
@@ -662,6 +668,11 @@ Both directions were verified in-game with a live client: `open_addon currency` 
 visibly open while its agent still reports inactive. The census is a hint, not ground truth; `open_addon`/
 `close_addon` are the reliable operations.
 
+Click dispatch was likewise verified live: a synthetic `buttonPress`+`buttonRelease` pair on the Currency
+window's close collision node closes the window, and the probe tools confirmed that real mouse clicks reach a
+different receiver than the addon's vtable (component-registered listeners), which is why the `registered`
+event mode and the listener-level probe exist.
+
 Valid `format` values for `read_memory` and `read_object_memory`: `hexdump`, `bytes`, `u8`, `u16`, `u32`,
 `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `string`, `utf16`, `pointer`.
 
@@ -671,7 +682,7 @@ integer precision past 2^53 and 64-bit pointers routinely exceed that. The parse
 
 ## Safety model
 
-**Read-only by default.** 33 of the 36 tools read state; none writes it. The mutating gate is enforced, and the
+**Read-only by default.** 33 of the 42 tools read state; none writes it. The mutating gate is enforced, and the
 only tools registered behind it are the two UI tools that open and close addon windows — they stay invisible
 until `AllowMutatingTools` is turned on. There is still no chat-command or input-injection tool.
 
@@ -783,7 +794,7 @@ What was verified before that session, and still stands:
   with the **official** MCP SDK as the client — framing judged by somebody else's implementation, and all 36
   shipped schemas compiled against the JSON Schema 2020-12 meta-schema by the SDK's own `ajv`.
 - `tests\PluginLoadTest` passes `93/93` running the shipped `Plugin` constructor out of game: the real load
-  path executes, registers all 36 tools, binds the configured port, serves MCP over a real socket, validates every
+  path executes, registers all 42 tools, binds the configured port, serves MCP over a real socket, validates every
   shipped tool schema and cross-checks it against what the handlers demand, honours the
   request-log and bearer-token settings end to end, runs every `/dalamudmcp` subcommand against the live
   listener, reads **real game data** through a Reflection.Emit-built data manager backed by this machine's

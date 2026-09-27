@@ -19,8 +19,10 @@ namespace DalamudMCP.Tools;
 /// </summary>
 internal static unsafe class AtkEventProbe
 {
+    /// <summary>Single shared delegate type — two identical-looking delegate types are NOT
+    /// interchangeable to the CLR even within one assembly.</summary>
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void ReceiveEventDelegate(
+    public delegate void ReceiveEventDelegate(
         AtkEventListener* self, AtkEventType eventType, int param, AtkEvent* evt, AtkEventData* eventData);
 
     public sealed record CapturedEvent(
@@ -41,38 +43,61 @@ internal static unsafe class AtkEventProbe
 
     public static bool IsHooked => hookedUnit != IntPtr.Zero;
 
-    public static object Enable(AtkUnitBase* unit)
-    {
-        if (unit is null)
-            return Json.ToolError("no addon resolved for probe_enable");
-        if (hookedUnit == (IntPtr)unit)
-            return new JObject { ["hooked"] = true, ["already"] = true, ["addon"] = unit->NameString };
+    public static object Enable(AtkUnitBase* unit) => EnableListener(unit, null);
 
+    /// <summary>Hook ReceiveEvent on either the addon itself or, when listenerPtr is
+    /// given, on one specific registered listener (a component/AtkEventListener instance).
+    /// Real clicks on component-registered nodes bypass the addon's vtable slot, so the
+    /// listener-level hook is what captures them.</summary>
+    public static object EnableListener(AtkUnitBase* unit, void* listenerPtr)
+    {
+        if (unit is null && listenerPtr is null)
+            return Json.ToolError("no addon resolved for probe_enable");
         if (hookedUnit != IntPtr.Zero)
             return Json.ToolError("another addon is already hooked; disable it first");
 
-        var vtbl = (AtkEventListener.AtkEventListenerVirtualTable*)unit->VirtualTable;
-        if (vtbl is null)
-            return Json.ToolError("addon vtable is null");
+        IntPtr target;
+        string label;
+        if (listenerPtr is not null)
+        {
+            target = (IntPtr)listenerPtr;
+            label = "listener";
+        }
+        else
+        {
+            target = (IntPtr)unit;
+            label = unit->NameString;
+        }
 
-        // The address of the ReceiveEvent function-pointer field inside the class vtable.
-        var slot = (IntPtr*)(&vtbl->ReceiveEvent);
+        var vtblPtr = *(IntPtr*)target; // first field of the struct is the vtable pointer
+        if (vtblPtr == IntPtr.Zero)
+            return Json.ToolError("target vtable pointer is null");
+
+        // VirtualFunction(2) — the ReceiveEvent slot lives at vtable + 0x10 (two 8-byte
+        // slots above it: Dtor at +0x0, ReceiveGlobalEvent at +0x8). FCS's generated
+        // vtable struct exposes the slot as a function-pointer field, which cannot be
+        // marshalled as a managed object, so address it by raw slot offset instead.
+        var slot = (IntPtr*)(vtblPtr + 2 * IntPtr.Size);
 
         hookDelegate ??= ReceiveEventHook;
         var replacement = Marshal.GetFunctionPointerForDelegate(hookDelegate);
         original = *slot;
-        *slot = replacement;
-        ProbeTrampoline.Set(original);
 
-        hookedUnit = (IntPtr)unit;
+        // Set the trampoline BEFORE swapping the slot: if trampoline setup fails the
+        // slot must stay untouched — a half-installed hook forwards into a null
+        // trampoline and takes the game down with it.
+        ProbeTrampoline.Set(original);
+        *slot = replacement;
+
+        hookedUnit = target;
         hookSlot = (IntPtr)slot;
 
         Captured.Clear();
         return new JObject
         {
             ["hooked"] = true,
-            ["addon"] = unit->NameString,
-            ["addonId"] = (int)unit->Id,
+            ["target"] = label,
+            ["targetPtr"] = target.ToString("X"),
             ["slot"] = hookSlot.ToString("X"),
             ["original"] = original.ToString("X"),
         };
@@ -174,28 +199,31 @@ internal static unsafe class AtkEventProbe
             // The probe must never break the game's event dispatch.
         }
 
-        var fwdSelf = hookedUnit == IntPtr.Zero ? self : (AtkEventListener*)hookedUnit;
-        ProbeTrampoline.Invoke(fwdSelf, eventType, param, evt, eventData);
+        // Forward with the receiver the event was actually delivered to — self, not the
+        // hooked target (the hooked slot is shared across instances of the same class).
+        ProbeTrampoline.Invoke(self, eventType, param, evt, eventData);
     }
 }
 
-/// <summary>Trampoline helper: calls the original function pointer saved at hook time.</summary>
+/// <summary>Trampoline helper: calls the original function pointer saved at hook time.
+/// The slot may hold either a raw native function OR a managed-delegate stub left by a
+/// previous hook generation (stubs survive plugin reloads because the native stub roots
+/// the old collectible assembly). Delegate stubs are themselves executable code, so BOTH
+/// cases are invoked through a raw unmanaged function-pointer call — never round-tripped
+/// through GetDelegateForFunctionPointer, which throws InvalidCastException
+/// ('Unable to cast object of type ReceiveEvent ...') on a stub pointer.</summary>
 internal static unsafe class ProbeTrampoline
 {
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    public delegate void ReceiveEventDelegate(
-        AtkEventListener* self, AtkEventType eventType, int param, AtkEvent* evt, AtkEventData* eventData);
+    private static IntPtr originalPtr;
 
-    private static ReceiveEventDelegate? originalDelegate;
-
-    public static void Set(IntPtr original) =>
-        originalDelegate = Marshal.GetDelegateForFunctionPointer<ReceiveEventDelegate>(original);
+    public static void Set(IntPtr original) => originalPtr = original;
 
     public static void Invoke(
         AtkEventListener* self, AtkEventType eventType, int param, AtkEvent* evt, AtkEventData* eventData)
     {
-        if (originalDelegate is null)
+        if (originalPtr == IntPtr.Zero)
             throw new InvalidOperationException("probe trampoline not set");
-        originalDelegate(self, eventType, param, evt, eventData);
+        ((delegate* unmanaged[Cdecl]<AtkEventListener*, AtkEventType, int, AtkEvent*, AtkEventData*, void>)originalPtr)(
+            self, eventType, param, evt, eventData);
     }
 }
