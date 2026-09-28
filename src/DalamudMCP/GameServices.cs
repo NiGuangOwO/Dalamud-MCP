@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Dalamud.Game.ClientState;
+using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility.Signatures;
 using Lumina.Excel;
@@ -35,6 +36,14 @@ public sealed class GameServices
     public required IAetheryteList AetheryteList { get; init; }
     public required ISigScanner SigScanner { get; init; }
     public required IGameInteropProvider Interop { get; init; }
+    public required IBuddyList BuddyList { get; init; }
+    public required IDutyState DutyState { get; init; }
+
+    /// <summary>
+    /// The plugin interface is used by a few tools to persist config changes made
+    /// through MCP (event collection settings, registered IPC endpoints).
+    /// </summary>
+    public IDalamudPluginInterface? PluginInterface { get; init; }
 
     public Configuration Config { get; init; } = new();
 

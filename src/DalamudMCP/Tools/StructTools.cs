@@ -16,7 +16,7 @@ namespace DalamudMCP.Tools;
 /// <para>These exist only where the raw structure reaches something the managed API does not.
 /// <c>get_job_gauge</c> is the clearest case: Dalamud's <c>IJobGauges</c> accessor is not one of
 /// the services this plugin is given, so without a direct read there is no gauge surface at all.
-/// <c>get_status_effects</c> exposes the status-manager header fields (owner, flag byte,
+/// <c>get_active_statuses</c> exposes the status-manager header fields (owner, flag byte,
 /// special-status timer) that Dalamud's <c>StatusList</c> does not surface.</para>
 ///
 /// <para>Every member read here is a plain field at a <c>FieldOffset</c>. The member-function
@@ -118,8 +118,8 @@ internal static class StructTools
             _ => JobGauge());
 
         registry.Add(
-            "get_status_effects",
-            "Get status effects",
+            "get_active_statuses",
+            "Get active statuses",
             "Reads a character's StatusManager directly out of FFXIVClientStructs: the status array " +
             "(id, parameter, remaining time, source) plus the header fields Dalamud's managed status " +
             "list does not expose - the manager's owner, its flag byte, and the special-status " +
@@ -217,7 +217,7 @@ internal static class StructTools
         return result;
     }
 
-    // ---------------------------------------------------------------- get_status_effects
+    // ---------------------------------------------------------------- get_active_statuses
 
     private static object StatusEffects(GameServices svc, JObject args)
     {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
 namespace DalamudMCP.Mcp;
@@ -16,8 +17,20 @@ public sealed class McpTool
     /// <summary>True when the tool mutates game state and must be explicitly enabled in config.</summary>
     public bool Mutating { get; init; }
 
-    /// <summary>Invoked with the request's <c>arguments</c> object. May return null (serialized as JSON null).</summary>
-    public required Func<JObject, object?> Handler { get; init; }
+    /// <summary>
+    /// Invoked with the request's <c>arguments</c> object. May return null (serialized as JSON null).
+    /// Runs on the game's framework thread. Exactly one of <see cref="Handler"/> and
+    /// <see cref="AsyncHandler"/> is set.
+    /// </summary>
+    public Func<JObject, object?>? Handler { get; init; }
+
+    /// <summary>
+    /// Handler for a tool that has to wait for something (an event, a state change). It runs on
+    /// the request's own thread rather than the framework thread, because blocking the game loop
+    /// for the length of a wait would stall the client. Exactly one of <see cref="Handler"/> and
+    /// <see cref="AsyncHandler"/> is set.
+    /// </summary>
+    public Func<JObject, Task<object?>>? AsyncHandler { get; init; }
 
     public JObject ToJson() => new()
     {
@@ -84,6 +97,34 @@ public sealed class ToolRegistry
         });
     }
 
+    /// <summary>
+    /// Registers a tool whose handler may block waiting for something. The handler is awaited on
+    /// the request's thread instead of being marshalled onto the framework thread, so a wait does
+    /// not stall the game loop; it must marshal any game-state access itself.
+    /// </summary>
+    public McpTool AddAsync(
+        string name,
+        string title,
+        string description,
+        JObject schema,
+        Func<JObject, Task<object?>> handler,
+        bool mutating = false)
+    {
+        var args = schema["properties"] as JObject;
+        if (args is not null)
+            description = BuildDescription(description, args);
+
+        return Add(new McpTool
+        {
+            Name = name,
+            Title = title,
+            Description = description,
+            InputSchema = schema,
+            AsyncHandler = handler,
+            Mutating = mutating,
+        });
+    }
+
     private static string BuildDescription(string description, JObject args)
     {
         if (args.Count == 0) return description;
@@ -91,7 +132,15 @@ public sealed class ToolRegistry
         var lines = new List<string>();
         foreach (var prop in args.Properties())
         {
-            var type = prop.Value["type"]?.Value<string>() ?? "any";
+            // "type" may be a single string or an array of strings (union types like
+            // "integer or array of integer"); both must render, neither may throw.
+            var typeToken = prop.Value["type"];
+            var type = typeToken switch
+            {
+                null => "any",
+                JArray arr => string.Join(" | ", arr.Select(v => v.Value<string>())),
+                _ => typeToken.Value<string>() ?? "any",
+            };
             var desc = prop.Value["description"]?.Value<string>();
             var enumValues = prop.Value["enum"] is JArray e
                 ? " (" + string.Join(" | ", e.Select(v => v.Value<string>())) + ")"

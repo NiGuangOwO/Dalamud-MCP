@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using DalamudMCP.Mcp;
@@ -189,6 +190,40 @@ internal static class UiTools
                 ("event", "string", "Which event to dispatch: click (default), doubleClick, buttonClick, buttonPress, buttonRelease, or 'registered' to fire every handler the node has registered (closest to a real mouse click)", false),
                 ("param", "integer", "Override the event callback param (uint32). Advanced: the game normally derives it from the node's registered handler; ClickLib-style close buttons need 0xFFFFFFFF (-1)", false)),
             args => ClickAddonElement(args),
+            mutating: true);
+
+        registry.Add(
+            "get_addon_strings",
+            "Read an addon (UI window)'s value table",
+            "Reports the string and scalar values an addon currently carries in its AtkValue " +
+            "table — the text a menu, dialog or list is displaying right now. Each entry is " +
+            "index, type and decoded value; control characters are escaped so the raw payload " +
+            "is visible. Pass 'addon' or 'addonId'. Read-only.",
+            Json.Schema(
+                ("addon", "string", "Addon name to read (same names open_addon accepts)", false),
+                ("addonId", "integer", "Raw AtkUnitBase id to read (overrides addon)", false),
+                ("maxValues", "integer", "Maximum entries to report (1-500, default 200)", false),
+                ("stringsOnly", "boolean", "Only report string-typed values (default false)", false)),
+            args => GetAddonStrings(args));
+
+        registry.Add(
+            "select_addon_menu_item",
+            "Select an item in an addon (UI window) menu",
+            "Picks an entry from a menu-style addon (one whose options live in its AtkValue " +
+            "table) by label, and activates it by firing the addon's callback with the entry's " +
+            "index — the same call the game makes when the option is clicked. Matching is exact " +
+            "after normalization unless containsMatch is set. Pass 'index' instead of 'label' to " +
+            "select positionally. Read the candidates first with get_addon_strings. This is a " +
+            "mutating tool: it is hidden from tools/list and refused by tools/call while the " +
+            "plugin's allow-mutating-tools switch is off.",
+            Json.Schema(
+                ("addon", "string", "Addon name whose menu to select from", false),
+                ("addonId", "integer", "Raw AtkUnitBase id (overrides addon)", false),
+                ("label", "string", "Menu entry label to select (required unless index is given)", false),
+                ("index", "integer", "Select by position instead of label", false),
+                ("containsMatch", "boolean", "Match labels by substring instead of exact (default false)", false),
+                ("dryRun", "boolean", "Report the entry that would be selected without activating it", false)),
+            args => SelectAddonMenuItem(args),
             mutating: true);
 
         // Temporary diagnostic tools for the click-dispatch investigation. Mutating: the
@@ -718,6 +753,245 @@ internal static class UiTools
             ["clicked"] = true,
             ["via"] = "addon vtable",
         };
+    }
+
+    // ---------------------------------------------------------------- addon value table
+
+    /// <summary>
+    /// Reads the addon's AtkValue table: the values the client handed the addon on its last
+    /// SetAtkValues call. For menu-style addons these are the option labels, which is what
+    /// makes both reading the choices and selecting one possible without an addon-specific
+    /// layout.
+    /// </summary>
+    private static unsafe object GetAddonStrings(JObject args)
+    {
+        var unit = ResolveAddon(args["addon"]?.Value<string>(), args["addonId"]);
+        if (unit is null)
+            return Json.ToolError("no addon resolved; pass 'addon' (a name from the open_addon " +
+                                  "allowlist) or 'addonId'");
+
+        if (!unit->IsReady)
+            return Json.ToolError($"addon '{unit->NameString}' is not ready yet");
+
+        var maxValues = ClampInt(args["maxValues"], 1, 500, 200);
+        var stringsOnly = args["stringsOnly"]?.Value<bool>() ?? false;
+
+        var values = unit->AtkValuesSpan;
+        var entries = new JArray();
+        var strings = 0;
+        for (var i = 0; i < values.Length; i++)
+        {
+            try
+            {
+                AtkValue* value;
+                fixed (AtkValue* p = &values[i]) value = p;
+                if (IsStringValue(value->Type)) strings++;
+
+                if (entries.Count >= maxValues) continue;
+                if (stringsOnly && !IsStringValue(value->Type)) continue;
+
+                var decoded = DecodeAddonValue(value);
+                if (string.IsNullOrEmpty(decoded)) continue;
+
+                entries.Add(new JObject
+                {
+                    ["index"] = i,
+                    ["type"] = value->Type.ToString(),
+                    ["value"] = decoded,
+                });
+            }
+            catch
+            {
+                // A value the decoder cannot reach is skipped rather than failing the read.
+            }
+        }
+
+        return new JObject
+        {
+            ["addon"] = unit->NameString,
+            ["addonId"] = (int)unit->Id,
+            ["valueCount"] = values.Length,
+            ["stringCount"] = strings,
+            ["count"] = entries.Count,
+            ["entries"] = entries,
+        };
+    }
+
+    private static unsafe bool IsStringValue(AtkValueType type) =>
+        type is AtkValueType.String or AtkValueType.ManagedString or AtkValueType.ConstString
+            or AtkValueType.WideString;
+
+    /// <summary>Decode one addon AtkValue to its display text (or invariant scalar text).</summary>
+    private static unsafe string? DecodeAddonValue(AtkValue* value)
+    {
+        switch (value->Type)
+        {
+            case AtkValueType.String:
+            case AtkValueType.ManagedString:
+            case AtkValueType.ConstString:
+                return EscapeText(value->String.ToString());
+            case AtkValueType.WideString:
+                return EscapeText(Marshal.PtrToStringUni((IntPtr)value->WideString) ?? string.Empty);
+            case AtkValueType.Bool:
+                return value->Byte != 0 ? "true" : "false";
+            case AtkValueType.Int:
+                return value->Int.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            case AtkValueType.Int64:
+                return value->Int64.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            case AtkValueType.UInt:
+                return value->UInt.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            case AtkValueType.UInt64:
+                return value->UInt64.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            case AtkValueType.Float:
+                return value->Float.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Escapes control characters so a raw UI payload stays readable in JSON, mirroring how
+    /// the game's own text payloads separate attributes with 0x02.
+    /// </summary>
+    private static string EscapeText(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+
+        var builder = new System.Text.StringBuilder(text.Length);
+        foreach (var c in text)
+        {
+            if (char.IsControl(c)) builder.Append("\\u").Append(((int)c).ToString("X4"));
+            else builder.Append(c);
+        }
+
+        return builder.ToString();
+    }
+
+    private static unsafe object SelectAddonMenuItem(JObject args)
+    {
+        var unit = ResolveAddon(args["addon"]?.Value<string>(), args["addonId"]);
+        if (unit is null)
+            return Json.ToolError("no addon resolved; pass 'addon' or 'addonId'");
+
+        if (!unit->IsReady)
+            return Json.ToolError($"addon '{unit->NameString}' is not ready yet");
+
+        var values = unit->AtkValuesSpan;
+        var candidates = new List<(int Index, string Label)>();
+        for (var i = 0; i < values.Length; i++)
+        {
+            AtkValue* value = null;
+            try
+            {
+                fixed (AtkValue* p = &values[i]) value = p;
+                if (!IsStringValue(value->Type)) continue;
+                var entryLabel = DecodeAddonValue(value);
+                if (string.IsNullOrWhiteSpace(entryLabel)) continue;
+                candidates.Add((i, NormalizeMenuLabel(entryLabel)));
+            }
+            catch
+            {
+                // Skip unreadable values; the menu may still be selectable by index.
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return Json.ToolError($"addon '{unit->NameString}' carries no string entries in its " +
+                                  "value table, so no menu could be read from it");
+        }
+
+        var indexArg = args["index"];
+        var label = args["label"]?.Value<string>();
+        var containsMatch = args["containsMatch"]?.Value<bool>() ?? false;
+        var dryRun = args["dryRun"]?.Value<bool>() ?? false;
+
+        (int Index, string Label) selected;
+        if (indexArg is not null && indexArg.Type != JTokenType.Null)
+        {
+            var index = indexArg.Value<int>();
+            if (index < 0 || index >= values.Length)
+                throw new ToolException($"index {index} is outside the addon's value table (0-{values.Length - 1})");
+
+            var hit = candidates.FirstOrDefault(c => c.Index == index);
+            selected = hit.Label is null ? (index, string.Empty) : hit;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(label))
+                throw new ToolException("provide either label or index");
+
+            var wanted = NormalizeMenuLabel(label);
+            var exact = candidates.Where(c => string.Equals(c.Label, wanted, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (exact.Count == 0 && containsMatch)
+                exact = candidates.Where(c => c.Label.Contains(wanted, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            if (exact.Count == 0)
+            {
+                var options = string.Join(" | ", candidates.Take(20).Select(c => c.Label));
+                throw new ToolException($"no menu entry matches '{label}'. Available: {options}");
+            }
+
+            if (exact.Count > 1 && !containsMatch)
+            {
+                var options = string.Join(" | ", exact.Select(c => $"{c.Label} (index {c.Index})"));
+                throw new ToolException($"'{label}' matches more than one entry: {options}. Pass index to disambiguate.");
+            }
+
+            selected = exact[0];
+        }
+
+        if (dryRun)
+        {
+            return new JObject
+            {
+                ["addon"] = unit->NameString,
+                ["addonId"] = (int)unit->Id,
+                ["index"] = selected.Index,
+                ["label"] = selected.Label,
+                ["dryRun"] = true,
+                ["selected"] = false,
+            };
+        }
+
+        var fired = unit->FireCallbackInt(selected.Index);
+        return new JObject
+        {
+            ["addon"] = unit->NameString,
+            ["addonId"] = (int)unit->Id,
+            ["index"] = selected.Index,
+            ["label"] = selected.Label,
+            ["selected"] = true,
+            ["callbackAccepted"] = fired,
+        };
+    }
+
+    /// <summary>
+    /// Trims a menu label to its display text: control characters removed, surrounding
+    /// whitespace collapsed, and the decorative prefixes the client adds to highlighted or
+    /// keyboard-hinted entries stripped.
+    /// </summary>
+    private static string NormalizeMenuLabel(string? label)
+    {
+        if (string.IsNullOrEmpty(label)) return string.Empty;
+
+        var cleaned = new System.Text.StringBuilder(label.Length);
+        foreach (var c in label)
+        {
+            if (char.IsControl(c)) continue;
+            cleaned.Append(c);
+        }
+
+        var text = cleaned.ToString().Trim();
+        const string decorations = " \u3000・•★☆▶►◆◇◉○●■□";
+        text = text.TrimStart(decorations.ToCharArray());
+        text = text.Trim();
+
+        // A single-letter shortcut prefix ("A Continue") is not part of the label.
+        if (text.Length > 2 && char.IsLetter(text[0]) && text[1] == ' ')
+            text = text[2..].TrimStart();
+
+        return text;
     }
 
     // ---------------------------------------------------------------- node helpers

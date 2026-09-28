@@ -6,9 +6,10 @@
 服务器，让 AI Agent 能够从运行中的游戏客户端读取实时状态。插件运行在游戏进程内部，因此可以读取客户端
 自身使用的同一份内存：对象表、本地玩家、小队与联军、目标、FATE、货币、Excel 游戏数据，以及通过
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) 读取的任意经过校验的原始内存。MCP 客户端连接
-`http://127.0.0.1:18777/mcp` 即可调用 45 个工具 —— 33 个只读，外加 12 个 UI/诊断工具（可选开启的可变更工具），
-用于打开和关闭游戏内的 addon 窗口。全部 33 个只读工具均已针对一个实时登录的客户端完成验证
-—— 见[局限](#局限)。
+`http://127.0.0.1:18777/mcp` 即可调用 87 个工具 —— 58 个只读，外加 29 个可变更工具（可选开启），能直接作用于
+游戏：施放技能、选择目标与移动、发送聊天、管理插件、操控 addon 窗口，以及与其他插件注册 IPC 端点。后台还有一个
+事件采集器，把游戏状态变化记入环形缓冲区，Agent 可以轮询变化而不必每回合重读完整状态。那次唯一的游戏内验证会话
+当时交付的 33 个只读工具均已针对一个实时登录的客户端完成验证 —— 该会话覆盖与未覆盖的范围见[局限](#局限)。
 
 ## 构建
 
@@ -127,7 +128,7 @@ dotnet run --project LoadabilityCheck.csproj
 它直接加载插件程序集，并与国服 dev 程序集中 Dalamud 自己的类型表相比较，不链接任何源码 —— 它校验的
 是交付的二进制而不是源码。
 
-**它还用 Dalamud 自己的容器代码（而不是一份拷贝）回答了 DI 问题。** 本测试的早期版本对二十个构造函数
+**它还用 Dalamud 自己的容器代码（而不是一份拷贝）回答了 DI 问题。** 本测试的早期版本对二十三个构造函数
 参数只能报告"类型存在"，因为 `ServiceContainer` 的接口映射看上去只在运行中的客户端里存在。其实不是：
 `RegisterInterfaces` 是纯特性反射，`ValidateCtor` 从不解引用服务实例 —— 它只读取 `instances` 中的*类型*
 加 `[ScopedService]` 特性。于是测试构建一个真实的 `ServiceContainer`，完全按照
@@ -153,7 +154,7 @@ scoped 服务类型安装一个单例键（`Task.FromResult<T>(null)` 就够了 
 第四个对照是因果性的那个：它用**相同**的接口映射重建容器但扣住单例键，并断言同一个构造函数随后被
 拒绝。没有它，"83 个单例已安装"就只是装饰，结论可能是重建过程的产物而不是关于 Dalamud 的陈述。
 
-**偏移审计。** 直接结构体工具（`get_job_gauge`、`get_status_effects`）通过手工抄录的 FFXIVClientStructs
+**偏移审计。** 直接结构体工具（`get_job_gauge`、`get_active_statuses`）通过手工抄录的 FFXIVClientStructs
 字段偏移读取游戏内存。一次移动了字段的库更新不会抛异常 —— 它会静默读到另一个成员的字节。所以测试
 从已安装的 `FFXIVClientStructs.dll` 本身重新推导每个声明的常量（用特性偏移而非 `Marshal.OffsetOf`，因为
 这些类型带有 `Marshal` 无法布局的指针成员）：`BattleChara.StatusManager` 位于 +9136、`StatusManager` 的
@@ -174,7 +175,7 @@ FFXIVClientStructs 更新现在会在这里按名字失败，而不是在游戏�
 
 `tests\PluginLoadTest` 走得更远，**在游戏外运行交付的 `Plugin` 构造函数**。上面三个测试从不执行插件
 类型：两个用桩游戏线程重托管传输层，一个只读元数据。这个测试按路径加载 `DalamudMCP.dll`，用
-`DispatchProxy` 合成的二十个 Dalamud 服务实例化 `DalamudMCP.Plugin`，然后通过真实 TCP 与监听器说 MCP。
+`DispatchProxy` 合成的二十三个 Dalamud 服务实例化 `DalamudMCP.Plugin`，然后通过真实 TCP 与监听器说 MCP。
 
 ```powershell
 cd <仓库根目录>\tests\PluginLoadTest
@@ -182,15 +183,15 @@ dotnet run --project PluginLoadTest.csproj -p:Platform=x64
 ```
 
 ```
-93/93 checks passed
+99/99 checks passed
 
 The shipped plugin loads, registers its tools, binds its port, serves MCP, and unloads.
 ```
 
-> 数量取决于本机是否能找到游戏数据：有真实数据管理器时为 `93/93`，没有时为 `87/87`。多出的六项是
+> 数量取决于本机是否能找到游戏数据：有真实数据管理器时为 `99/99`，没有时为 `93/93`。多出的六项是
 > 真实游戏数据断言与"无逃逸异常"契约检查。
 
-它端到端地走了一遍真实的加载路径：配置加载与 `Sanitize`、服务对象图的构建、全部五个工具集注册进真实
+它端到端地走了一遍真实的加载路径：配置加载与 `Sanitize`、服务对象图的构建、全部十八个工具集注册进真实
 注册表、ImGui 窗口构建、`UiBuilder.Draw` / `OpenConfigUi` 订阅、`/dalamudmcp` 命令注册、HTTP 监听器绑定
 配置的端口、处理器经 `GameThread` 运行并返回格式良好的 JSON，以及一个干净的 `Dispose`（取消两个事件
 订阅、移除命令、停止监听器）。这是"插件会加载"所能给出的最强游戏外证据 —— 而且加载本身后来也在
@@ -214,7 +215,7 @@ token（`AuthToken`）和端口。前两项在插件构造之后设置到配置�
 这些字节。安全防护 —— 它存在的理由是坏指针本来会触发击杀整个游戏客户端的访问违例 —— 通过读取地址
 `0x1` 并要求得到一句有措辞的拒绝来检查；这条断言能写出来本身就是防护生效的证据。
 
-全部 45 个交付工具的 schema 都通过真实 socket 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型
+全部 87 个交付工具的 schema 都通过真实 socket 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型
 `properties` 的 JSON 对象，每个属性必须携带 JSON Schema 七个合法名之一的 `type`，每个 `array` 必须说明其
 `items`，`required` 里的每个名字都必须真的被声明。加这条检查是因为它立刻抓到了一个真实缺陷：
 `read_pointer_chain` 把它的 `offsets` 参数声明为
@@ -255,7 +256,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 ```
 12/12 interop checks passed
 2/2 negative-control checks passed
-93/93 checks passed
+99/99 checks passed
 11/11 real-schema checks passed
 INTEROP OK
 ```
@@ -265,16 +266,16 @@ INTEROP OK
 往返一次工具调用、把工具错误作为 `isError` 接收而非传输失败，并且之后继续工作。它还被给了那个并集
 数组 schema（曾有真实缺陷的形状）去解析，因为这正是客户端可能呛住的细节类型。
 
-该套件的第四阶段校验全部 45 个**交付** schema，而不是合成的：`PluginLoadTest` 在设置了
+该套件的第四阶段校验全部 87 个**交付** schema，而不是合成的：`PluginLoadTest` 在设置了
 `DALAMUD_MCP_DUMP_TOOLS` 时导出它的 `tools/list` 载荷，该载荷经过 SDK 声明的 `ToolSchema`，再用 SDK 内置
-的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译（45 个 schema —— 参数总数以下一次完整 interop 运行的实测为准，schema 变更时会重新测量）。
+的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译（87 个 schema —— 参数总数以下一次完整 interop 运行的实测为准，schema 变更时会重新测量）。
 
 "要求检查必须能够失败"教会了我们两件事：
 
 **官方 SDK 自己的工具 schema 校验宽松到抓不住本项目的缺陷。** 它的 `ToolSchema` 把 `inputSchema` 类型定
 为带 `"object"` 型 `type` 与 `properties` 记录的对象，其值只被检查为*对象* —— 从不检查属性的 `type` 是否为
-JSON Schema 的合法名。把原始 `{"type":"array of integer"}` 缺陷重新注入真实的 45 工具载荷，它照样通过。
-因此标签被重写为只陈述它证明的内容（官方 SDK 接受全部 45 个交付工具定义为 tools/list 输出），并加入了
+JSON Schema 的合法名。把原始 `{"type":"array of integer"}` 缺陷重新注入真实的 87 工具载荷，它照样通过。
+因此标签被重写为只陈述它证明的内容（官方 SDK 接受全部 87 个交付工具定义为 tools/list 输出），并加入了
 ajv 元 schema 检查，它以一条独立的消息拒绝：`type must be JSONType or JSONType[]: array of integer`。
 
 **因错误原因而通过的阴性对照不是对照。** `negative.mjs` 把官方客户端指向一个刻意不符规的服务器并要求
@@ -298,7 +299,7 @@ ajv 元 schema 检查，它以一条独立的消息拒绝：`type must be JSONTy
 
 ### 数据管理器是真的，不是桩
 
-二十个服务中有十九个是惰性的 `DispatchProxy` 桩。数据管理器不是，因为在那里桩无法被做成可用的。
+二十三个服务中有二十二个是惰性的 `DispatchProxy` 桩。数据管理器不是，因为在那里桩无法被做成可用的。
 
 `DispatchProxy` 不会把它生成的方法重写复制泛型参数约束，所以重写
 
@@ -339,10 +340,10 @@ sqpack 目录按以下顺序定位：`DALAMUD_MCP_SQPACK` 环境变量、四个�
 
 它刻意**不**声称什么，并诚实地报告：
 
-- **不**声称二十个服务*实例*能在游戏内构造，或它们读取的游戏侧状态就绪。`LoadabilityCheck` 现在确实
+- **不**声称二十三个服务*实例*能在游戏内构造，或它们读取的游戏侧状态就绪。`LoadabilityCheck` 现在确实
   另行解决了"Dalamud 的容器是否会把那些服务交给构造函数"这个独立问题，方法是离线重建真实
   `ServiceContainer` 并调用 Dalamud 自己的 `FindApplicableCtor`；此处仍未验证的是服务自身的运行时行为。
-- **不**声称每个处理器都返回有意义的游戏数据。十九个服务仍是惰性的，触及对象表、内存、sig 扫描器或
+- **不**声称每个处理器都返回有意义的游戏数据。二十二个服务仍是惰性的，触及对象表、内存、sig 扫描器或
   游戏状态的处理器看到的是中性值并报告有措辞的错误（扫描输出会准确显示是哪些、有多少）。表层是例外，
   它是真的。
 - **不**声称任何挂钩存活客户端进程的事情。那个缺口后来已另行关闭 —— 见[局限](#局限)中的游戏内验证
@@ -380,11 +381,10 @@ sqpack 目录按以下顺序定位：`DALAMUD_MCP_SQPACK` 环境变量、四个�
 得到。闸门在两处强制：可变更工具被从 `tools/list` 过滤掉，即使客户端知道名字，`tools/call` 也会以解释性
 错误拒绝。打开设置还会把标签从"read-only (recommended)"换成"agents may change game state"警告。
 
-**注意：** 闸门已完整实现并测试，现在第一批可变更工具已在它之后交付：三个 UI 工具（`open_addon`、
-`close_addon`，外加只读的 `get_addon_state`）可以打开和关闭游戏内的 addon 窗口，例如背包、军械库或
-任务搜索器。`open_addon` 与 `close_addon` 被标记为可变更，因此在 `AllowMutatingTools` 打开之前，它们在
-`tools/list` 中不可见、`tools/call` 会拒绝；其余工具集（33 个工具）仍然只读，也依旧没有聊天命令或输入
-注入工具。
+**注意：** 闸门已完整实现并测试，可变更工具都在它之后交付：上列 29 个工具 —— 技能施放与选择目标、自动移动、
+传送、聊天与斜杠命令、插件管理、addon 窗口控制、屏幕截图与 IPC 端点注册 —— 都能作用于游戏。全部被标记为
+可变更，因此在 `AllowMutatingTools` 打开之前，它们在 `tools/list` 中不可见、`tools/call` 会拒绝；其余 58 个
+工具仍然只读。
 
 ## 连接 Agent
 
@@ -488,8 +488,8 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-45 个工具：33 个只读，外加 12 个 UI/诊断工具（`open_addon`、`close_addon`、`click_addon_element` 与六个会安装 hook 的 `probe_*` 工具是可变更工具，在
-`AllowMutatingTools` 打开前隐藏；`get_addon_state`、`list_addon_elements`、`probe_receive_event_dump` 只读）。名称与 `tools/list` 中完全一致。
+87 个工具：58 个只读，外加 29 个可变更工具（控制、聊天、插件管理、addon 窗口与 IPC 端点注册），
+在 `AllowMutatingTools` 打开前隐藏。名称与 `tools/list` 中完全一致。
 
 ### 客户端与会话
 
@@ -516,6 +516,15 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 | `get_fates` | 活跃 FATE 及其等级范围、进度、剩余时间与位置。 | `fateId` |
 | `get_nearby_enemies` | 半径内的战斗 NPC，按距离排序，只返回存活的。 | `radius`（默认 30）、`max`（默认 50） |
 | `get_object_table_info` | 原始对象表地址与每个数组的条目数。 | 无 |
+
+### 物品栏与伙伴
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `get_inventory` | 角色随身携带的四个主背包，每个槽位含物品 id、名称、数量与槽位索引。所有容器合计上限 200 条。 | 无 |
+| `get_equipment` | 当前穿戴的装备，按槽位：物品 id、名称、数量、耐久度（%）与精炼度/收藏品度。 | 无 |
+| `get_buddy_list` | 伙伴列表：陆行鸟与宠物/信任伙伴，含实体 id、数据 id、HP/MP，以及存在时解析出的游戏对象。 | 无 |
+| `get_duty_state` | 当前是否处于副本中，绑定了内容查找器条件时附带其（名称、id）。 | 无 |
 
 需要已加载角色的工具在标题画面时返回 `{"available": false, "reason": "not logged in"}` 而不是失败 ——
 调用永远安全。
@@ -550,7 +559,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 | 工具 | 描述 | 关键参数 |
 | --- | --- | --- |
 | `get_job_gauge` | 直接从 `JobGaugeManager` 内存读取的实时职业量表，覆盖 Dalamud 托管 API 不暴露的量表状态（可注入服务中没有量表访问器）。报告 `classJobId`，然后在管理器的 union 中定位该职业的专属量表结构体并解码每个 `[FieldOffset]` 字段 —— 包括渲染为命名位的 `BitFieldAttribute` 位段 —— 外加原始字节。没有专属量表的职业（秘术士、忍者、青魔）返回 `hasDedicatedGauge=false`。 | 无 |
-| `get_status_effects` | BattleChara 的原始 60 槽 `StatusManager`，按结构体偏移读取而非通过 Dalamud 的 `StatusList`：owner 地址、附加标志字节、特殊状态计时器/方向浮点，以及每个状态条目（id、参数、剩余时间、来源对象 id、表名称/描述/层数）。像 `read_object_memory` 一样解析目标，或传绝对 `address`。 | `address`、`entityId`、`objectIndex`、`localPlayer`、`max`（默认 60） |
+| `get_active_statuses` | BattleChara 的原始 60 槽 `StatusManager`，按结构体偏移读取而非通过 Dalamud 的 `StatusList`：owner 地址、附加标志字节、特殊状态计时器/方向浮点，以及每个状态条目（id、参数、剩余时间、来源对象 id、表名称/描述/层数）。像 `read_object_memory` 一样解析目标，或传绝对 `address`。 | `address`、`entityId`、`objectIndex`、`localPlayer`、`max`（默认 60） |
 
 这两个工具在本插件其他任何地方都以同样方式降级：若 FFXIVClientStructs 的静态地址解析器尚未初始化
 （插件在游戏就绪前加载），工具返回 `{"available": false, ...}` 及原因，绝不抛异常。
@@ -564,6 +573,8 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 | `get_addon_state` | 只读普查：允许列表中哪些 agent 当前处于活动状态。报告 `active` 与 `inactive` 名称列表。 | 无 |
 | `list_addon_elements` | 遍历一个已加载 addon 的节点树（从根节点 DFS），报告每个节点的 id、类型、标签、尺寸、屏幕位置与是否可点击 —— UI 自动化的发现半边。组件节点（按钮、列表、下拉）报告其运行时组合类型。 | `addon` 或 `addonId`、`maxDepth`（默认 12）、`maxNodes`（默认 100） |
 | `click_addon_element` | 通过 addon 自身的 `ReceiveEvent` 向已加载 addon 内的一个节点派发一个 Atk UI 事件 —— 与真实输入管线走同一条派发路径。事件类型：`click`（MouseClick）、`doubleClick`、`buttonClick`（ButtonClick 25）、`buttonPress`（23）、`buttonRelease`（24）、`registered`（触发该节点注册的每个处理器）。真实点击是一次 press+release 对，因此关闭窗口就是先 `buttonPress` 再 `buttonRelease`。 | `addon` 或 `addonId`、`nodeId` 或 `index`、`event`、`param`（高级覆盖） |
+| `get_addon_strings` | 报告 addon 当前在其 `AtkValue` 表中携带的字符串与标量值 —— 即某个菜单、对话框或列表此刻正在显示的文本。每条为 index、type 与解码后的值；控制字符被转义，原始载荷保持可见。只读。 | `addon` 或 `addonId`、`maxValues`（1-500，默认 200）、`stringsOnly` |
+| `select_addon_menu_item` | 从菜单型 addon（选项存放在其 `AtkValue` 表中）按标签选中一项，并以该项的 index 触发 addon 回调来激活它 —— 与玩家点击该选项时游戏发出的调用相同。除非设置 `containsMatch`，匹配在归一化后为精确匹配。 | `addon` 或 `addonId`、`label` 或 `index`、`containsMatch`、`dryRun` |
 | `probe_receive_event_enable` | 诊断：交换一个已加载 addon 的 `ReceiveEvent` vtable 槽，使它收到的每个 UI 事件 —— 真实的或合成的 —— 在被转发前先被捕获。配合 `probe_receive_event_dump` 对比真实点击与 `click_addon_element` 派发内容的差异。 | `addon` 或 `addonId` |
 | `probe_receive_event_enable_listener` | 同样的捕获，但 hook 的是特定节点的第一个注册监听器而非 addon 本身（真实组件点击落在节点注册的监听器上）。 | `addon` 或 `addonId`、`nodeId`（必填） |
 | `probe_receive_event_disable` | 恢复被 hook 的 vtable 槽。 | 无 |
@@ -572,9 +583,12 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 | `probe_callback_disable` | 卸载 FireCallback 探针。可变更。 | 无 |
 | `probe_callback_dump` | 返回捕获到的每个回调：addon 名称、参数个数、每个按类型解码的 `AtkValue`（Int/UInt/Bool/Float/String/...）、close/更新可见性标志以及返回值。只读。 | 无 |
 
-这些是本插件第一批可变更工具：`open_addon` 与 `close_addon` 以可变更标志注册，因此在 `AllowMutatingTools`
-关闭（默认）时，它们会从 `tools/list` 中被过滤、`tools/call` 会拒绝。失败（agent 模块未初始化、agent 不可
-打开）像工具集其余部分一样返回结构化 `{"available": false, "reason": ...}` 而不是抛异常。
+这些工具中 `open_addon`、`close_addon`、`click_addon_element`、`select_addon_menu_item` 与五个安装 hook 的
+`probe_*` 工具以可变更标志注册（`get_addon_state`、`list_addon_elements`、`get_addon_strings`、
+`probe_receive_event_dump`、`probe_callback_dump` 只读），
+在 `AllowMutatingTools` 关闭（默认）时，它们会从 `tools/list` 中被过滤、`tools/call` 会拒绝。失败（agent
+模块未初始化、agent 不可打开）像工具集其余部分一样返回结构化 `{"available": false, "reason": ...}` 而不是
+抛异常。
 
 两个方向都已在游戏内用实时客户端验证：`open_addon currency` 打开货币窗口、`close_addon currency` 关闭它
 （经目视确认）。一个需要了解的怪癖：`get_addon_state` 报告的是 `AgentInterface.IsAgentActive`，它不会在
@@ -591,11 +605,119 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 地址以 `"0x7FF6A1B2C3D4"` 这样的十六进制字符串发出和接受，因为 JSON 数字在 2^53 之后丢失整数精度，而
 64 位指针经常超过它。解析器也接受结尾 `h`、下划线和纯十进制，但传带引号的 `0x` 字符串是最可靠的形式。
 
+### 角色控制（可变更，需 opt-in）
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `execute_action` | 通过 `ActionManager.UseAction` 施放技能。按 id 解析技能，或按 Action 表中的精确名称。目标默认为自身目标 id（`0xE0000000`），除非给定 `targetObjectId`。`dryRun` 只向游戏询问该技能此刻能否使用。可选的职业/区域守卫在角色不匹配时拒绝调用。 | `actionId`、`actionName`、`targetObjectId`（默认自身）、`dryRun`、`requiredClassJobId`、`requiredTerritoryId` |
+| `use_duty_action` | 触发两个职责动作之一（副本额外授予的按钮），以槽位 1 或 2 寻址。副本未授予时拒绝。 | `slot`（必需：1 或 2） |
+| `use_general_action` | 按 id 触发通用指令（疾跑、跳跃、自动移动、下坐骑、接受复活等）。 | `actionId`（必需） |
+| `set_target` | 按对象 id 设置硬目标，或按名称（先精确匹配，再包含匹配）。 | `targetObjectId`、`targetName` |
+| `set_focus_target` | 以同样方式设置焦点目标；无参数时清除。 | `targetObjectId`、`targetName` |
+| `interact_with_target` | 通过 `TargetSystem` 与当前硬目标交互（对话、开箱、操作物件）。 | 无 |
+| `dismount` | 下坐骑（通用指令）；未骑乘时返回提示而非触发。 | 无 |
+| `cancel_cast` | 通过快捷栏模块取消当前咏唱。 | 无 |
+| `accept_raise` | 接受复活。 | 无 |
+| `toggle_sprint` | 切换疾跑。 | 无 |
+| `jump` | 跳跃。 | 无 |
+| `toggle_autorun` | 切换自动奔跑。 | 无 |
+| `face_target` | 面向当前目标。 | 无 |
+
+全部十三个都是可变更工具，在 `AllowMutatingTools` 打开前隐藏。需要登录角色的工具在其他情况下
+返回标准 `{"available": false, "reason": "not logged in"}`。
+
+### 移动（可变更，需 opt-in）
+
+自动移动通过 [vnavmesh](https://github.com/awgil/ffxiv_navmesh) 插件的 IPC 通道沿真实导航网格行进；两个
+工具在它未安装加载时会以有措辞的错误拒绝，因为没有网格就没有路径。挑选目的地（而非走路）是 Agent 的
+职责 —— 先用 `get_game_objects` 确定 id 或名称。
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `move_to_entity` | 开始向一个游戏对象自动移动，先把目的地吸附到地面网格。 | `gameObjectId`（必需，十进制或 `0x` 十六进制）、`allowFlight` |
+| `move_to_nearby_targetable_object` | 找到名称包含给定文本的最近可选中对象并开始向其自动移动。除非设置 `includePlayers`，玩家角色会被跳过。 | `name`（必需）、`maxDistance`（默认 30）、`includePlayers`、`allowFlight` |
+
+### 出行（可变更，需 opt-in）
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `teleport_to_aetheryte` | 通过 `Telepo` 按 id 或名称传送到一个已解锁的以太之光，消耗与游戏内传送菜单相同的金币。名称匹配宽松 —— 忽略大小写、标点与前置冠词，裸区域名匹配其主城以太之光 —— 可用 `territoryId` 打破平局。 | `aetheryteId`、`name`、`territoryId`、`subIndex` |
+
+### 聊天与插件管理（可变更，需 opt-in）
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `send_chat` | 通过游戏自身的聊天框入口处理器发送一行聊天。频道：`say`、`yell`、`shout`、`party`、`alliance`、`fc`、`tell`（需要 `target`）、`echo`。消息在到达游戏前强制 UTF-8 编码并有 500 字节上限。 | `message`（必需）、`channel`（默认 `say`）、`target` |
+| `manage_plugin` | 通过聊天命令加载、卸载、重载或查询第三方插件。`reload` 会先停用再延迟重新加载。插件名只允许字母、数字与 `._-`；DLL 路径必须绝对、存在且以 `.dll` 结尾。拒绝管理本插件自身。 | `action`（必需：`load`/`unload`/`reload`/`all`）、`pluginName`、`filePath` |
+| `slash_command` | 运行任意游戏或插件斜杠命令，与手动敲进聊天框完全一样，例如 `/duty finder`、`/target`、`/pcmd move`、`/vnav moveto`。命令会先交给 Dalamud 的命令管理器，因此游戏与插件命令的解析与玩家一致；只有它拒绝时才通过聊天框提交。普通聊天请用 `send_chat`，命令用这个。 | `command`（必需，须以 `/` 开头，最多 500 UTF-8 字节） |
+
+### 插件桥接（IPC）
+
+让 Agent 与其他插件通信并接收它们推送的数据，走 Dalamud 标准 IPC。
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `query_push_data` | 读取其他插件推送到本插件 `PushData` 通道的条目（2000 条环形缓冲区），最新在前，可按 key 过滤。 | `key`、`count`（默认 50） |
+| `register_ipc_endpoint` | 声明另一个插件暴露了可调用端点，持久化到配置中、跨重启保留。 | `pluginName`、`methodName`、`signature`（必需：`Func<bool>`、`Func<string>`、`Func<int, string>`、`Action<bool>`、`Func<bool, string>`）、`description` |
+| `call_plugin_ipc` | 调用一个先前注册的端点。`Func<bool>`/`Func<string>` 不带参数；其余需要 `arguments.value`。调用未注册的端点是显式错误，而非猜测。 | `pluginName`、`methodName`、`arguments` |
+| `list_ipc_endpoints` | 已注册的端点，可按插件过滤。 | `pluginName` |
+| `plugin_data_subscribe` | 按 key 保留其他插件通过推送通道发来的载荷，放在一个专用队列中供 `plugin_data_poll` 增量排空。无订阅期间到达的载荷只能通过 `query_push_data` 看到，并在滚动缓冲区绕回后丢失。 | `key`（必需）、`capacity`（16-10000，默认 1000） |
+| `plugin_data_poll` | 排空某个已订阅 key 保留的载荷，最旧在前。被排空的条目会移除，因此每个载荷只投递一次；其余留待下次轮询。队列为空时报告 `no_data`。 | `key`（必需）、`maxItems`（1-10000，默认 200） |
+| `plugin_data_unsubscribe` | 停止为某个 key 保留载荷，并丢弃该 key 仍在队列中的内容。 | `key`（必需） |
+
+只有 `register_ipc_endpoint` 是可变更工具；读取推送数据、管理订阅、调用已注册端点与列出端点都是只读。
+
+### 事件采集器
+
+后台采集器随框架每帧记录游戏状态变化到 2000 条环形缓冲区，Agent 可以轮询"自上次以来发生了什么变化"，
+而不必每回合重读完整状态。事件：`hp_change`、`mp_change`、`gp_change`、`player_move`、`job_change`、
+`target_change`、`focus_target_change`、`target_hp_change`、`combat_damage`、`combat_start`、`combat_end`、
+`map_change`、`mount_change`、`duty_update`、`fate_update`、`nearby_enemy`、`nearby_player`。登录后的第一帧
+建立基线、不发事件，按类型的节流（默认 500 ms）让缓冲区保持平静。
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `query_events` | 缓冲的事件，最新在前，可按类型与时间窗过滤。 | `types`、`count`（默认 50，上限 500）、`since`、`before`（epoch 毫秒） |
+| `configure_event_collection` | 更新采集器记录的内容（玩家属性、目标属性、对象范围、战斗/系统事件、节流），先校验再持久化。省略的字段保持当前值。 | `config`（部分更新） |
+| `get_event_config` | 当前采集配置与缓冲区占用。 | 无 |
+| `events_wait` | 阻塞直到记录到匹配事件或超时，然后返回最旧在前的新事件。带上一次回复的 `lastId` 作为 `afterId` 以等待更新的事件；`timedOut=true` 表示超时内没有任何事件到达。这是唯一不在框架线程上运行的工具 —— 占用它的等待会卡住客户端。 | `afterId`、`types`、`count`（1-500，默认 100）、`timeoutMs`（1-30000，默认 10000） |
+
+四个都是只读 —— 采集器只观察。
+
+### 聊天日志
+
+客户端收到的聊天行在到达时被捕获进 1000 条环形缓冲区，因此 Agent 可以读取说了什么，而不必去刮屏幕。
+每行携带频道（`XivChatType` 名称）、发送者、消息、关系类型与两种时间戳。
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `get_chat_log` | 返回捕获的聊天行，最旧在前，可按聊天类型、发送者或消息子串过滤。带上一次回复的 `afterId` 只取更新的行；回复中的 `lastId` 是下一次调用的游标。 | `count`（1-500，默认 100）、`chatType`、`sender`、`contains`、`afterId`、`since`、`before` |
+
+### 任务
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `get_quest_status` | 报告某个任务是已接受还是已完成、处于哪个序列步骤，按 id 或（部分）名称查找。名称查找会搜索所有已安装的客户端语言，因此在非英文客户端上也能用英文名找到任务。 | `questId`、`query`、`maxResults`（1-20，默认 8） |
+| `get_available_quests` | 列出世界中当前提供但尚未接受的任务，含地图标记位置、等级与目标 id —— 读取自游戏自身未接受任务标记列表。 | `nameContains`、`maxResults`（1-20，默认 8） |
+
+### 屏幕截图
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `capture_game_screenshot` | 截取游戏画面为 PNG 并返回 base64 编码。`client` 只抓 3D 场景，`window` 含标题栏与边框。截图取自窗口自身表面，因此客户端可以处于后台。`save=true` 时还会写入插件的 `captures` 目录，下次保存时清理过期文件。 | `area`（枚举：`client`/`window`，默认 `client`）、`save`、`ttlSeconds`（60-86400，默认 600）、`maxDimension`（256-3840，默认 1920） |
+
+### 已安装插件
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `plugin_list` | 列出 Dalamud 报告的插件，含加载状态与 manifest 摘要，按游标分页。 | `query`、`cursor`、`limit`（1-100，默认 50） |
+| `plugin_describe` | 完整报告一个插件的 manifest：作者、描述、版本、仓库、标签与加载状态。 | `pluginName`（必需） |
+
 ## 安全模型
 
-**默认只读。** 45 个工具中的 33 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的只有打开和
-关闭 addon 窗口的两个 UI 工具 —— 在 `AllowMutatingTools` 打开前它们不可见。依旧没有聊天命令或输入注入
-工具。
+**默认只读。** 87 个工具中的 58 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 29 个工具
+—— 技能施放、选择目标与移动、聊天、插件管理、addon 窗口控制与 IPC 端点注册 —— 在 `AllowMutatingTools`
+打开前不可见。
 
 **仅回环。** 监听器直接以 `TcpListener` 绑定 `IPAddress.Loopback`（`127.0.0.1`），而非 `HttpListener`。这
 避免了 HTTP.SYS 的 URL-ACL 要求 —— 无需提权或 `netsh` 预留 —— 也意味着服务器永远无法从网络访问。不要
@@ -633,7 +755,7 @@ MCP 客户端
   -> MiniHttp         在 TcpListener 上手工解析 HTTP/1.1；无 HTTP.SYS，无 ASP.NET
   -> McpServer        路由、强制认证与会话、分发 JSON-RPC 方法
   -> GameThread       IFramework.RunOnFrameworkThread + 超时
-  -> 工具处理器        五个 Tool* 类之一，以 JSON 参数调用
+  -> 工具处理器        十八个 Tool* 类之一，以 JSON 参数调用
   -> GameServices     Dalamud 服务（IObjectTable、IPartyList、IPlayerState、IDataManager 等）
      + FFXIVClientStructs   直接读取客户端自身结构体
   -> JSON 结果        以 MCP 文本内容序列化返回
@@ -658,11 +780,11 @@ MCP 客户端
 
 ## 局限
 
-**游戏内验证已完成 —— 一次，在这台机器上，用实时客户端。** 全部 33 个只读工具都在 FFXIV 运行且角色登录的
+**游戏内验证已完成 —— 一次，在这台机器上，用实时客户端。** 当时存在的全部 33 个只读工具都在 FFXIV 运行且角色登录的
 状态下通过真实端点（`http://127.0.0.1:18777/mcp`）调用过，每一个都返回了真实游戏数据（或对真正为空的
 状态返回了正确的"空"答案 —— 单人小队、无 FATE、无目标、空闲量表）。亮点：`get_local_player` 返回了
 实时角色（名称、100 级、职业、HP/MP、世界、位置）；`get_game_objects` 枚举了玩家、一只宠物和训练木桩
-及距离；`get_job_gauge` 实时解码了 `BardGauge`；`get_status_effects` 在玩家与木桩上都于恰好经审计的 +9136
+及距离；`get_job_gauge` 实时解码了 `BardGauge`；`get_active_statuses` 在玩家与木桩上都于恰好经审计的 +9136
 偏移处定位到 `StatusManager`；`read_object_memory` 在 +144 处返回了预期的 `ObjectKind` 字节；每个 Excel
 工具都从客户端自己的数据作答（国服 —— 火之碎晶、吟游诗人、强化药）；`read_memory` 在模块基址返回了
 `MZ` 头；`scan_signature` 找到了真实匹配；`get_module_info` 报告了真实的客户端模块。
@@ -691,10 +813,10 @@ MCP 客户端
   单例键并断言同一构造函数随后被拒绝 —— 所以结论是关于 Dalamud 的，而不是关于测试装置的。偏移审计
   从已安装的库本身重新推导每个手工抄录的 FFXIVClientStructs 偏移。
 - `tests\McpInterop` 以**官方** MCP SDK 为客户端通过 `12/12` 协议检查、`2/2` 阴性对照检查与 `11/11`
-  真实 schema 检查 —— 组帧由别人的实现裁决，全部 45 个交付 schema 由 SDK 自带的 `ajv` 对照 JSON Schema
+  真实 schema 检查 —— 组帧由别人的实现裁决，全部 87 个交付 schema 由 SDK 自带的 `ajv` 对照 JSON Schema
   2020-12 元 schema 编译。
-- `tests\PluginLoadTest` 在游戏外运行交付的 `Plugin` 构造函数通过 `93/93`：真实加载路径执行、注册全部
-  45 个工具、绑定配置端口、在真实 socket 上服务 MCP、校验每个交付工具 schema 并与处理器实际索求交叉
+- `tests\PluginLoadTest` 在游戏外运行交付的 `Plugin` 构造函数通过 `99/99`：真实加载路径执行、注册全部
+  87 个工具、绑定配置端口、在真实 socket 上服务 MCP、校验每个交付工具 schema 并与处理器实际索求交叉
   核对、端到端遵守请求日志与 bearer token 设置、对存活监听器运行每个 `/dalamudmcp` 子命令、通过由本机
   已安装 `sqpack` 文件支撑的 Reflection.Emit 构建的数据管理器读取**真实游戏数据**（物品 1 解析为金币）、
   在自己进程内读取并验证**真实内存**，以及干净卸载。
@@ -713,7 +835,21 @@ MCP 客户端
 - 请求日志记录方法、工具名、结果与耗时 —— 刻意不记录参数体或结果载荷，所以它不会告诉你*传了什么*。
   原始内存读取只按名称记录，其参数不会出现在任何地方。
 - 插件本身没有 stdio 传输；支持 HTTP 的客户端直连，仅 stdio 的客户端走 `bridge\DalamudMcpBridge`。
-- 没有可变更工具，所以 `AllowMutatingTools` 目前对暴露内容没有影响。
+- 可变更工具（控制、聊天、插件管理、addon 窗口、移动、传送、屏幕截图、IPC 端点注册）只在游戏外演练过，
+  每个处理器都按预期以有措辞的错误（未登录或参数被拒）回答；它们的游戏内行为尚未验证，事件采集器、
+  聊天日志捕获与 IPC 桥接也尚未对实时客户端运行过。
+- 验证会话之后新增的工具 —— `capture_game_screenshot`、`teleport_to_aetheryte`、`move_to_entity`、
+  `move_to_nearby_targetable_object`、`get_chat_log`、`events_wait`、`slash_command`、`use_duty_action`、
+  `get_quest_status`、`get_available_quests`、`plugin_data_subscribe`、`plugin_data_poll`、
+  `plugin_data_unsubscribe`、`plugin_list`、`plugin_describe`、`get_addon_strings` 与
+  `select_addon_menu_item` —— 由游戏外套件覆盖（schema 校验、真实 socket 全量 sweep 与可加载性检查），
+  但**尚未**针对运行中的游戏客户端驱动过。它们的参数契约、错误文案与 JSON 形状经过测试；它们对游戏的
+  实际作用没有。
+- `move_to_entity` 与 `move_to_nearby_targetable_object` 还依赖第三方
+  [vnavmesh](https://github.com/awgil/ffxiv_navmesh) 插件已安装并加载；没有它时它们返回有措辞的错误而非
+  部分路径。该 IPC 握手尚未在本机针对实时 vnavmesh 构建演练过。
+- `capture_game_screenshot` 把 PNG 以 base64 编码放在 JSON-RPC 结果内返回，因此全分辨率截图是一个很大的
+  响应；`maxDimension`（默认 1920）是控制手段，而 `save=true` 会把文件写入磁盘，供能读路径的 Agent 流水线使用。
 - `get_game_objects` 等枚举工具读取整张对象表后在内存中过滤，常规对象数没问题，但不适合高频轮询循环。
 - 插件未打包进插件仓库；未引用 `DalamudPackager`。
 - 会话存储把会话保存在内存中，2 小时空闲即过期，长期空闲的客户端必须重新 `initialize`。

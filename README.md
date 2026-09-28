@@ -7,9 +7,12 @@ server on a loopback port, so an AI agent can read live game state from a runnin
 inside the game process, so it can read the same memory the client itself uses: the object table, the local
 player, party and alliance, targets, FATEs, currency, Excel game data, and arbitrary validated raw memory
 through [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs). An MCP client connects to
-`http://127.0.0.1:18777/mcp` and calls 45 tools — 33 read-only plus 12 UI/diagnostic tools (opt-in, mutating) that can
-open and close in-game addon windows. The 33 read-only tools were all verified against a live, logged-in
-client — see [Limitations](#limitations).
+`http://127.0.0.1:18777/mcp` and calls 87 tools — 58 read-only plus 29 mutating tools (opt-in) that can act on the
+game: cast actions, target and move, send chat, manage plugins, drive addon windows, and register IPC endpoints with
+other plugins. A background event collector also records game-state changes into a ring buffer that an agent can poll
+instead of re-reading full state. The 33 read-only tools that shipped at the time of the one live verification
+session were all verified against a live, logged-in client — see [Limitations](#limitations) for what that
+session did and did not cover.
 
 ## Build
 
@@ -143,7 +146,7 @@ It loads the plugin assembly directly and compares it against Dalamud's own type
 assemblies, linking no source at all, so it validates the shipped binary rather than the sources.
 
 **It also answers the DI question, using Dalamud's own container code rather than a copy of it.** The earlier
-version of this test could only report "the type exists" for each of the twenty constructor parameters,
+version of this test could only report "the type exists" for each of the twenty-three constructor parameters,
 because `ServiceContainer`'s interface map looks like it only exists in a running client. It does not:
 `RegisterInterfaces` is pure attribute reflection, and `ValidateCtor` never dereferences a service instance —
 it reads only the *types* in `instances` plus `[ScopedService]` attributes. So the test builds a real
@@ -154,7 +157,7 @@ it reads only the *types* in `instances` plus `[ScopedService]` attributes. So t
 `FindApplicableCtor`. The verdict is Dalamud's, not this project's reimplementation of the rule:
 
 ```
-112 service types mapped, 83 singletons installed, 29 scoped left out | 19 interface, 0 singleton, 1 scoped
+112 service types mapped, 83 singletons installed, 29 scoped left out | 22 interface, 0 singleton, 1 scoped
 [PASS] Dalamud's own container accepts the plugin constructor
 [PASS] the container probe is capable of rejecting a constructor
 [PASS] the container probe still accepts a resolvable constructor
@@ -173,7 +176,7 @@ container with the **same** interface map but withholds the singleton keys, and 
 constructor is then refused. Without that, "83 singletons installed" would be decoration and the verdict could
 be an artifact of the rebuild rather than a statement about Dalamud.
 
-**The offset audit.** The direct-struct tools (`get_job_gauge`, `get_status_effects`) read game memory through
+**The offset audit.** The direct-struct tools (`get_job_gauge`, `get_active_statuses`) read game memory through
 hand-copied field offsets from FFXIVClientStructs. A library update that moves a field would not throw — it
 would silently read another member's bytes. So the test re-derives every declared constant from the installed
 `FFXIVClientStructs.dll` itself (attribute offsets rather than `Marshal.OffsetOf`, because these types carry
@@ -197,7 +200,7 @@ or that the game-side state they read is ready.
 
 `tests\PluginLoadTest` goes further and **runs the shipped `Plugin` constructor out of game**. The three tests
 above never execute the plugin type: two re-host the transport with a stub game thread and one only reads
-metadata. This one loads `DalamudMCP.dll` by path and instantiates `DalamudMCP.Plugin` with the twenty Dalamud
+metadata. This one loads `DalamudMCP.dll` by path and instantiates `DalamudMCP.Plugin` with the twenty-three Dalamud
 services it asks for, each synthesized by `DispatchProxy`, then speaks MCP to the listener over real TCP.
 
 ```powershell
@@ -206,22 +209,24 @@ dotnet run --project PluginLoadTest.csproj -p:Platform=x64
 ```
 
 ```
-93/93 checks passed
+99/99 checks passed
 
 The shipped plugin loads, registers its tools, binds its port, serves MCP, and unloads.
 ```
 
-> The count depends on whether the machine's game data could be found: `93/93` with a real data
-> manager, `87/87` without one. The extra six checks are the real-game-data assertions and the
+> The count depends on whether the machine's game data could be found: `99/99` with a real data
+> manager, `93/93` without one. The extra six checks are the real-game-data assertions and the
 > no-escaped-exception contract check.
 
 That exercises the actual load path end to end: config load and `Sanitize`, construction of the service graph,
-all five tool sets registering into the real registry, the ImGui window construction, the `UiBuilder.Draw` /
+all eighteen tool sets registering into the real registry, the ImGui window construction, the `UiBuilder.Draw` /
 `OpenConfigUi` subscriptions, the `/dalamudmcp` command registration, the HTTP listener binding the configured
 port, handlers running through `GameThread` and returning well-formed JSON, and a clean `Dispose` that
 unsubscribes both events, removes the command, and stops the listener. It is the strongest out-of-game evidence
 available for "the plugin will load" — and the load itself was later confirmed in game (see
-[Limitations](#limitations)).
+[Limitations](#limitations)), and every registered tool was swept with no arguments during that run: all eighteen
+tool sets register into the real registry, and every handler either returned a payload or answered with a deliberate,
+phrased error (not-logged-in, missing required parameter) rather than escaping an exception.
 
 Three of the config settings are asserted **through the shipped plugin**, not against a hand-built server: the
 request log (`LogRequests`), the bearer token (`AuthToken`), and the port. The first two are set on the config
@@ -248,7 +253,7 @@ because a bad pointer would otherwise raise an access violation that kills the g
 reading address `0x1` and requiring a phrased refusal; that the assertion can be written at all is evidence the
 guard held.
 
-Every one of the 36 shipped tool schemas is validated from `tools/list` over the real socket: each
+Every one of the 87 shipped tool schemas is validated from `tools/list` over the real socket: each
 `inputSchema` must be a JSON object with an object `properties`, every property must carry a `type` that is one of
 JSON Schema's seven legal names, every `array` must say what its `items` are, and every name in `required` must
 actually be declared. That check was added because it immediately found a real defect: `read_pointer_chain`
@@ -294,7 +299,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 ```
 12/12 interop checks passed
 2/2 negative-control checks passed
-93/93 checks passed
+99/99 checks passed
 11/11 real-schema checks passed
 INTEROP OK
 ```
@@ -306,18 +311,18 @@ tool error as `isError` rather than a transport failure, and keeps working after
 array-of-union schema (the shape that had the real defect) to parse, since that is exactly the kind of detail a
 client can choke on.
 
-The suite's fourth phase validates all 36 **shipped** schemas, not synthetic ones: `PluginLoadTest` dumps its
+The suite's fourth phase validates all 87 **shipped** schemas, not synthetic ones: `PluginLoadTest` dumps its
 `tools/list` payload when `DALAMUD_MCP_DUMP_TOOLS` is set, and that payload is run through the SDK's declared
 `ToolSchema` and then compiled against the JSON Schema 2020-12 meta-schema using the `ajv` bundled inside the SDK
-(36 schemas — exact parameter totals below reflect the last full interop run and are re-measured on schema changes).
+(87 schemas — exact parameter totals below reflect the last full interop run and are re-measured on schema changes).
 
 Two things were learned by requiring the checks to be able to fail:
 
 **The official SDK's own tool-schema validation is too lenient to catch this project's defect.** Its `ToolSchema`
 types `inputSchema` as an object with a `type` of `"object"` and a `properties` record whose values are only
 checked to be *objects* — never that a property's `type` is one of JSON Schema's legal names. Re-injecting the
-original `{"type":"array of integer"}` defect into the real 36-tool payload still passed it. The label was
-therefore rewritten to say only what it proves (`the official SDK accepts all 36 shipped tool definitions as
+original `{"type":"array of integer"}` defect into the real 87-tool payload still passed it. The label was
+therefore rewritten to say only what it proves (`the official SDK accepts all 87 shipped tool definitions as
 tools/list output`), and the ajv meta-schema pass was added, which rejects it with an independent message:
 `type must be JSONType or JSONType[]: array of integer`.
 
@@ -346,7 +351,7 @@ that cannot fail is not evidence.
 
 ### The data manager is real, not a stub
 
-Nineteen of the twenty services are inert `DispatchProxy` stubs. The data manager is not, because a stub cannot
+Twenty-two of the twenty-three services are inert `DispatchProxy` stubs. The data manager is not, because a stub cannot
 be made to work there.
 
 `DispatchProxy` does not copy a method's generic parameter constraints into the override it generates, so an
@@ -393,11 +398,11 @@ skipped.
 
 What it deliberately does **not** claim, and reports honestly instead:
 
-- **Not** that the twenty service *instances* construct in game, or that the game-side state they read is
+- **Not** that the twenty-three service *instances* construct in game, or that the game-side state they read is
   ready. `LoadabilityCheck` now does settle the separate question of whether Dalamud's container will hand the
   constructor those services at all, by rebuilding the real `ServiceContainer` offline and calling Dalamud's own
   `FindApplicableCtor`; what remains unverified here is the runtime behaviour of the services themselves.
-- **Not** that every handler returns meaningful game data. Nineteen services are still inert, so handlers that
+- **Not** that every handler returns meaningful game data. Twenty-two services are still inert, so handlers that
   touch the object table, memory, the sig scanner or game state see neutral values and report phrased errors
   (the sweep output shows exactly which, and how many). The sheet layer is the exception, and is real.
 - **Not** anything about hooking a live client process. That gap has since been closed separately — see the
@@ -442,11 +447,11 @@ are filtered out of `tools/list`, and `tools/call` rejects them with an explanat
 knows the name. Turning the setting on also changes the label from "read-only (recommended)" to a warning
 that "agents may change game state".
 
-**Note:** the gate is fully implemented and tested, and the first mutating tools now ship behind it: the three
-UI tools (`open_addon`, `close_addon`, plus the read-only `get_addon_state`) can open and close in-game addon
-windows such as the inventory, armoury, or duty finder. `open_addon` and `close_addon` are flagged mutating, so
-they stay invisible in `tools/list` and reject `tools/call` until `AllowMutatingTools` is turned on; the rest of
-the tool set (33 tools) remains read-only, and there is still no chat-command or input-injection tool.
+**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it: the 29 tools listed
+above — action casting and targeting, auto-movement, teleporting, chat and slash commands, plugin management,
+addon-window control, screen capture, and the IPC endpoint registry — can act on the game. All of them are
+flagged mutating, so they stay invisible in `tools/list` and reject `tools/call` until `AllowMutatingTools` is
+turned on; the other 58 tools remain read-only.
 
 ## Connect an agent
 
@@ -558,8 +563,9 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-45 tools: 33 read-only plus 12 UI/diagnostic tools (`open_addon`, `close_addon`, `click_addon_element`, and the six `probe_*` tools that install hooks are mutating and hidden until
-`AllowMutatingTools` is on; `get_addon_state` is read-only). Names are exactly as they appear in `tools/list`.
+87 tools: 58 read-only plus 29 mutating tools (control, chat, plugin management, addon windows, and the IPC
+endpoint registry) that are hidden until `AllowMutatingTools` is on. Names are exactly as they appear in
+`tools/list`.
 
 ### Client and session
 
@@ -586,6 +592,15 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 | `get_fates` | Active FATEs with level range, progress, time remaining and position. | `fateId` |
 | `get_nearby_enemies` | Battle NPCs within a radius, sorted by distance, alive only. | `radius` (default 30), `max` (default 50) |
 | `get_object_table_info` | Raw object-table addresses and per-array entry counts. | none |
+
+### Inventory and companions
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `get_inventory` | The player's carried inventories (the four main bags), each slot with item id, name, quantity, and slot index. Results are capped at 200 entries across all containers. | none |
+| `get_equipment` | Currently equipped gear, per slot: item id, name, quantity, condition (durability %) and spiritbond/collectability. | none |
+| `get_buddy_list` | Companion companions: chocobo and pet/trust buddies with entity id, data id, HP/MP and the resolved game object when present. | none |
+| `get_duty_state` | Whether a duty is currently started, plus the content-finder condition (name, id) when one is bound. | none |
 
 Tools that need a loaded character return `{"available": false, "reason": "not logged in"}` rather than
 failing when you are at the title screen, so a call is always safe.
@@ -620,7 +635,7 @@ failing when you are at the title screen, so a call is always safe.
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `get_job_gauge` | The live job gauge read straight from `JobGaugeManager`'s memory, for gauge state Dalamud's managed API does not expose (no gauge accessor is among the injectable services). Reports `classJobId`, then locates the dedicated gauge struct for that job inside the manager's union and decodes every `[FieldOffset]` field — including `BitFieldAttribute` bit ranges, rendered as named bits — plus the raw bytes. Jobs without a dedicated gauge (Arcanist, Rogue, Blue Mage) return `hasDedicatedGauge=false`. | none |
-| `get_status_effects` | The raw 60-slot `StatusManager` of a BattleChara, read at its struct offset rather than through Dalamud's `StatusList`: owner address, the extra-flags byte, the special-status timer/direction float, and every status entry (id, param, remaining time, source object id, sheet name/description/stacks). Resolve the target like `read_object_memory`, or pass an absolute `address`. | `address`, `entityId`, `objectIndex`, `localPlayer`, `max` (default 60) |
+| `get_active_statuses` | The raw 60-slot `StatusManager` of a BattleChara, read at its struct offset rather than through Dalamud's `StatusList`: owner address, the extra-flags byte, the special-status timer/direction float, and every status entry (id, param, remaining time, source object id, sheet name/description/stacks). Resolve the target like `read_object_memory`, or pass an absolute `address`. | `address`, `entityId`, `objectIndex`, `localPlayer`, `max` (default 60) |
 
 Both tools degrade the same way everywhere else in this plugin: if FFXIVClientStructs' static address resolver has
 not initialized (the plugin loaded before the game was ready) the tools return `{"available": false, ...}` with a
@@ -635,6 +650,8 @@ reason, never a thrown exception.
 | `get_addon_state` | Read-only census: which of the allowlisted agents are currently active. Reports `active` and `inactive` name lists. | none |
 | `list_addon_elements` | Walks a loaded addon's node tree (DFS from its root node) and reports each node's id, type, label, size, screen position, and whether it is clickable — the discovery half of UI automation. Component nodes (buttons, lists, drop-downs) report their runtime composite type. | `addon` or `addonId`, `maxDepth` (default 12), `maxNodes` (default 100) |
 | `click_addon_element` | Dispatches one Atk UI event to a node inside a loaded addon through the addon's own `ReceiveEvent` — the same dispatch the real input pipeline feeds. Event types: `click` (MouseClick), `doubleClick`, `buttonClick` (ButtonClick 25), `buttonPress` (23), `buttonRelease` (24), or `registered` (fires every handler the node has registered). A real click is a press+release pair, so closing a window is `buttonPress` followed by `buttonRelease`. | `addon` or `addonId`, `nodeId` or `index`, `event`, `param` (advanced override) |
+| `get_addon_strings` | Reports the string and scalar values an addon currently carries in its `AtkValue` table — the text a menu, dialog or list is displaying right now. Each entry is index, type and decoded value; control characters are escaped so the raw payload stays visible. Read-only. | `addon` or `addonId`, `maxValues` (1-500, default 200), `stringsOnly` |
+| `select_addon_menu_item` | Picks an entry from a menu-style addon (one whose options live in its `AtkValue` table) by label, and activates it by firing the addon's callback with that entry's index — the same call the game makes when the option is clicked. Matching is exact after normalization unless `containsMatch` is set. | `addon` or `addonId`, `label` or `index`, `containsMatch`, `dryRun` |
 | `probe_receive_event_enable` | Diagnostic: swaps one loaded addon's `ReceiveEvent` vtable slot so every UI event it receives — real or synthetic — is captured before being forwarded. Use with `probe_receive_event_dump` to compare what a real click delivers versus what `click_addon_element` sends. | `addon` or `addonId` |
 | `probe_receive_event_enable_listener` | Same capture, but hooks a specific node's first registered listener instead of the addon itself (real component clicks land on node-registered listeners). | `addon` or `addonId`, `nodeId` (required) |
 | `probe_receive_event_disable` | Restores the hooked vtable slot. | none |
@@ -643,9 +660,10 @@ reason, never a thrown exception.
 | `probe_callback_disable` | Unhooks the FireCallback probe. Mutating. | none |
 | `probe_callback_dump` | Returns every captured callback: addon name, value count, each `AtkValue` decoded by type (Int/UInt/Bool/Float/String/...), the close/update-visibility flag, and the return value. Read-only. | none |
 
-These are the plugin's first mutating tools: `open_addon` and `close_addon` are registered with the mutating
-flag, so they are filtered out of `tools/list` and rejected on `tools/call` while `AllowMutatingTools` is off
-(the default). Failures (agent module not initialized, agent not openable) return structured
+These tools are registered with the mutating flag behind `AllowMutatingTools` (off by default): `open_addon`,
+`close_addon`, `click_addon_element`, `select_addon_menu_item`, and the five `probe_*` tools that install hooks.
+`get_addon_state`, `list_addon_elements`, `get_addon_strings`, `probe_receive_event_dump` and `probe_callback_dump`
+are read-only. Failures (agent module not initialized, agent not openable) return structured
 `{"available": false, "reason": ...}` instead of throwing, like the rest of the tool set.
 
 Both directions were verified in-game with a live client: `open_addon currency` opens the Currency window and
@@ -666,11 +684,123 @@ Addresses are emitted and accepted as hex strings such as `"0x7FF6A1B2C3D4"`, be
 integer precision past 2^53 and 64-bit pointers routinely exceed that. The parser also accepts a trailing
 `h`, underscores, and bare decimal, but passing a quoted `0x` string is the reliable form.
 
+### Character control (mutating, opt-in)
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `execute_action` | Casts an action through `ActionManager.UseAction`. Resolve the action by id, or by exact name from the Action sheet. Targets the self target id (`0xE0000000`) unless `targetObjectId` is given. With `dryRun` it only asks the game whether the action could be used right now. Optional job/territory guards refuse the call when the character does not match. | `actionId`, `actionName`, `targetObjectId` (default self), `dryRun`, `requiredClassJobId`, `requiredTerritoryId` |
+| `use_duty_action` | Fires one of the two duty actions (the extra buttons a duty grants), addressed as slot 1 or 2. Refused when the duty grants none. | `slot` (required: 1 or 2) |
+| `use_general_action` | Fires a general action by id (sprint, jump, auto-run, dismount, accept raise, ...). | `actionId` (required) |
+| `set_target` | Sets the hard target by object id, or by name (exact match first, then contains). | `targetObjectId`, `targetName` |
+| `set_focus_target` | Sets the focus target the same way; with no arguments clears it. | `targetObjectId`, `targetName` |
+| `interact_with_target` | Interacts with the current hard target through `TargetSystem` (talk to NPCs, open chests, interact with objects). | none |
+| `dismount` | Dismounts (general action); reports a note instead of firing when not mounted. | none |
+| `cancel_cast` | Cancels the current cast through the hotbar module. | none |
+| `accept_raise` | Accepts a raise (return/raise prompt). | none |
+| `toggle_sprint` | Toggles sprint. | none |
+| `jump` | Jumps. | none |
+| `toggle_autorun` | Toggles auto-run. | none |
+| `face_target` | Turns the character toward the current target. | none |
+
+All thirteen are mutating and hidden until `AllowMutatingTools` is on. Tools that need a logged-in character
+return the standard `{"available": false, "reason": "not logged in"}` otherwise.
+
+### Movement (mutating, opt-in)
+
+Auto-movement follows a real navigation mesh through the [vnavmesh](https://github.com/awgil/ffxiv_navmesh)
+plugin's IPC channels; both tools refuse with a phrased error when it is not installed and loaded, because no
+mesh means no path. Reading the destination, not the walk, is the agent's job — use `get_game_objects` to pick
+an id or name first.
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `move_to_entity` | Starts auto-movement toward a game object, snapping the destination to the floor mesh first. | `gameObjectId` (required, decimal or `0x` hex), `allowFlight` |
+| `move_to_nearby_targetable_object` | Finds the closest targetable object whose name contains the given text and starts auto-movement toward it. Player characters are skipped unless `includePlayers` is set. | `name` (required), `maxDistance` (default 30), `includePlayers`, `allowFlight` |
+
+### Travel (mutating, opt-in)
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `teleport_to_aetheryte` | Teleports to an unlocked aetheryte by id or by name, through `Telepo`, at the same gil cost the in-game teleport menu would charge. Names are matched loosely — case, punctuation and leading articles are ignored, and a bare zone name matches its main city aetheryte — with `territoryId` available to break a tie. | `aetheryteId`, `name`, `territoryId`, `subIndex` |
+
+### Chat and plugin management (mutating, opt-in)
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `send_chat` | Sends a chat line through the game's own chat-box entry processor. Channels: `say`, `yell`, `shout`, `party`, `alliance`, `fc`, `tell` (requires `target`), `echo`. The message is UTF-8 encoded with a 500-byte cap enforced before it reaches the game. | `message` (required), `channel` (default `say`), `target` |
+| `manage_plugin` | Loads, unloads, reloads, or reports on third-party plugins through their chat commands. `reload` disables then re-loads after a short delay. Plugin names are restricted to letters, digits and `._-`; DLL paths must be absolute, exist, and end in `.dll`. Managing this plugin itself is refused. | `action` (required: `load`/`unload`/`reload`/`all`), `pluginName`, `filePath` |
+| `slash_command` | Runs any game or plugin slash command exactly as if it had been typed into the chat box, e.g. `/duty finder`, `/target`, `/pcmd move`, `/vnav moveto`. The command is first offered to Dalamud's command manager, so game and plugin commands resolve the same way they do for a user; only if that declines is it submitted through the chat box. Use `send_chat` for ordinary chat and this for commands. | `command` (required, must start with `/`, max 500 UTF-8 bytes) |
+
+### Plugin bridge (IPC)
+
+Lets the agent talk to other plugins and receive pushed data from them, over Dalamud's standard IPC.
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `query_push_data` | Reads entries another plugin pushed to this plugin's `PushData` channel (a 2000-entry ring buffer), newest first, optionally filtered by key. | `key`, `count` (default 50) |
+| `register_ipc_endpoint` | Declares that another plugin exposes a callable endpoint, persisted in the config across restarts. | `pluginName`, `methodName`, `signature` (required: `Func<bool>`, `Func<string>`, `Func<int, string>`, `Action<bool>`, `Func<bool, string>`), `description` |
+| `call_plugin_ipc` | Invokes a previously registered endpoint. `Func<bool>`/`Func<string>` take no arguments; the others require `arguments.value`. Calling an unregistered endpoint is an explicit error, not a guess. | `pluginName`, `methodName`, `arguments` |
+| `list_ipc_endpoints` | Registered endpoints, optionally filtered by plugin. | `pluginName` |
+| `plugin_data_subscribe` | Retains the payloads a plugin pushes over the push channel under one key, in a dedicated queue that `plugin_data_poll` drains incrementally. Payloads that arrive while nothing is subscribed are visible only through `query_push_data` and are lost to the rolling buffer once it wraps. | `key` (required), `capacity` (16-10000, default 1000) |
+| `plugin_data_poll` | Drains retained payloads for a subscribed key, oldest first. Drained entries are removed, so each payload is delivered once; the rest stay for the next poll. Reports `no_data` when the queue is empty. | `key` (required), `maxItems` (1-10000, default 200) |
+| `plugin_data_unsubscribe` | Stops retaining payloads for a key and discards anything still queued for it. | `key` (required) |
+
+Only `register_ipc_endpoint` is mutating; reading pushed data, managing subscriptions, invoking a registered
+call, and listing endpoints are read-only.
+
+### Event collector
+
+A background collector ticks with the framework and records game-state changes into a 2000-entry ring
+buffer, so an agent can poll "what changed since last time" instead of re-reading full state every turn.
+Events: `hp_change`, `mp_change`, `gp_change`, `player_move`, `job_change`, `target_change`,
+`focus_target_change`, `target_hp_change`, `combat_damage`, `combat_start`, `combat_end`, `map_change`,
+`mount_change`, `duty_update`, `fate_update`, `nearby_enemy`, `nearby_player`. The first frame after login
+establishes a baseline and emits nothing, and per-type throttling (default 500 ms) keeps the buffer calm.
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `query_events` | Buffered events, newest first, optionally filtered by type and timestamp window. | `types`, `count` (default 50, max 500), `since`, `before` (epoch ms) |
+| `configure_event_collection` | Updates what the collector records (player stats, target stats, object ranges, combat/system events, throttle), validated then persisted. Omitted fields keep their current value. | `config` (partial) |
+| `get_event_config` | The current collection configuration and buffer occupancy. | none |
+| `events_wait` | Blocks until a matching event is recorded, or the timeout elapses, then returns the new events oldest first. Pass `afterId` from a previous reply's `lastId` to wait for something newer; `timedOut=true` means nothing arrived in time. This is the one tool that does not run on the framework thread — a wait that occupied it would stall the client. | `afterId`, `types`, `count` (1-500, default 100), `timeoutMs` (1-30000, default 10000) |
+
+All four are read-only — the collector only observes.
+
+### Chat log
+
+Chat lines the client receives are captured into a 1000-entry ring buffer as they arrive, so an agent can read
+what was said instead of scraping the screen. Lines carry the channel (`XivChatType` name), sender, message,
+relation kinds and both timestamps.
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `get_chat_log` | Returns captured chat lines, oldest first, filterable by chat type, sender or message substring. Pass `afterId` from a previous reply to fetch only newer lines; the reply's `lastId` is the cursor for the next call. | `count` (1-500, default 100), `chatType`, `sender`, `contains`, `afterId`, `since`, `before` |
+
+### Quests
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `get_quest_status` | Reports whether a quest is accepted or complete and which sequence step it is on, looked up by id or by (partial) name. Name lookups search every installed client language, so a quest can be found by its English name on a non-English client. | `questId`, `query`, `maxResults` (1-20, default 8) |
+| `get_available_quests` | Lists quests currently offered in the world but not yet accepted, with map-marker position, level and objective id — read from the game's own unaccepted-quest marker list. | `nameContains`, `maxResults` (1-20, default 8) |
+
+### Screen capture
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `capture_game_screenshot` | Captures the game as a PNG and returns it base64-encoded. `client` grabs only the 3D scene, `window` includes the title bar and borders. The capture is taken from the window's own surface, so the client may be in the background. With `save=true` the file is also written into the plugin's `captures` folder, and expired files are pruned on the next save. | `area` (enum: `client`/`window`, default `client`), `save`, `ttlSeconds` (60-86400, default 600), `maxDimension` (256-3840, default 1920) |
+
+### Installed plugins
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `plugin_list` | Lists the plugins Dalamud reports, with load state and a manifest summary, paged by cursor. | `query`, `cursor`, `limit` (1-100, default 50) |
+| `plugin_describe` | Reports one plugin's manifest in full: author, description, version, repository, tags and load state. | `pluginName` (required) |
+
 ## Safety model
 
-**Read-only by default.** 33 of the 45 tools read state; none writes it. The mutating gate is enforced, and the
-only tools registered behind it are the two UI tools that open and close addon windows — they stay invisible
-until `AllowMutatingTools` is turned on. There is still no chat-command or input-injection tool.
+**Read-only by default.** 58 of the 87 tools read state; none writes it. The mutating gate is enforced, and the
+29 tools registered behind it — action casting, targeting and movement, chat, plugin management, addon-window
+control, and the IPC endpoint registry — stay invisible until `AllowMutatingTools` is turned on.
 
 **Loopback only.** The listener binds `IPAddress.Loopback` (`127.0.0.1`) directly with a `TcpListener`, not
 `HttpListener`. That avoids the HTTP.SYS URL-ACL requirement — no elevation and no `netsh` reservation is
@@ -712,7 +842,7 @@ MCP client
   -> MiniHttp         parses HTTP/1.1 by hand on a TcpListener; no HTTP.SYS, no ASP.NET
   -> McpServer        routes, enforces auth and session, dispatches JSON-RPC methods
   -> GameThread       IFramework.RunOnFrameworkThread + timeout
-  -> tool handler     one of the five Tool* classes, called with the JSON arguments
+  -> tool handler     one of the eighteen Tool* classes, called with the JSON arguments
   -> GameServices     Dalamud services (IObjectTable, IPartyList, IPlayerState, IDataManager, ...)
      + FFXIVClientStructs   direct reads of the client's own structures
   -> JSON result       serialized back as MCP text content
@@ -723,9 +853,10 @@ them outside the game. Everything above `GameThread` is transport and protocol; 
 live client.
 
 Registration is explicit rather than reflection-based. `Plugin` builds the object graph and calls
-`ClientTools.Register`, `ObjectTools.Register`, `DataTools.Register`, `MemoryTools.Register` and `StructTools.Register` against a
-shared `ToolRegistry`, whose `AllowMutating` delegate reads `Configuration.AllowMutatingTools` so the gate is
-evaluated per call rather than cached at startup.
+`Register` on each tool class against a shared `ToolRegistry` — client, objects, game data, raw memory,
+structs, UI, inventory, buddies, control, chat, plugin bridge and events — whose `AllowMutating`
+delegate reads `Configuration.AllowMutatingTools` so the gate is evaluated per call rather than cached
+at startup.
 
 ### Commands
 
@@ -739,12 +870,13 @@ evaluated per call rather than cached at startup.
 
 ## Limitations
 
-**In-game verification has been done — once, on this machine, with a live client.** All 33 read-only tools were called
+**In-game verification has been done — once, on this machine, with a live client.** All 33 read-only tools that
+existed at that point were called
 over the real endpoint (`http://127.0.0.1:18777/mcp`) with FFXIV running and a character logged in, and every
 one returned real game data (or the correct "empty" answer for genuinely empty state — solo party, no FATEs,
 no targets, idle gauge). Highlights: `get_local_player` returned the live character (name, level 100, job,
 HP/MP, world, position); `get_game_objects` enumerated the player, a minion and training dummies with
-distances; `get_job_gauge` decoded `BardGauge` live; `get_status_effects` located a `StatusManager` at
+distances; `get_job_gauge` decoded `BardGauge` live; `get_active_statuses` located a `StatusManager` at
 exactly the audited +9136 offset for both the player and a dummy; `read_object_memory` at +144 returned the
 expected `ObjectKind` bytes; every Excel tool answered from the client's own data (CN locale — 火之碎晶,
 吟游诗人, 强化药); `read_memory` at the module base returned the `MZ` header; `scan_signature` found real
@@ -777,10 +909,10 @@ What was verified before that session, and still stands:
   same constructor is then refused — so the result is a statement about Dalamud rather than about the harness.
   The offset audit re-derives every hand-copied FFXIVClientStructs offset from the installed library itself.
 - `tests\McpInterop` passes `12/12` protocol checks, `2/2` negative-control checks and `11/11` real-schema checks
-  with the **official** MCP SDK as the client — framing judged by somebody else's implementation, and all 36
+  with the **official** MCP SDK as the client — framing judged by somebody else's implementation, and all 87
   shipped schemas compiled against the JSON Schema 2020-12 meta-schema by the SDK's own `ajv`.
-- `tests\PluginLoadTest` passes `93/93` running the shipped `Plugin` constructor out of game: the real load
-  path executes, registers all 45 tools, binds the configured port, serves MCP over a real socket, validates every
+- `tests\PluginLoadTest` passes `99/99` running the shipped `Plugin` constructor out of game: the real load
+  path executes, registers all 87 tools, binds the configured port, serves MCP over a real socket, validates every
   shipped tool schema and cross-checks it against what the handlers demand, honours the
   request-log and bearer-token settings end to end, runs every `/dalamudmcp` subcommand against the live
   listener, reads **real game data** through a Reflection.Emit-built data manager backed by this machine's
@@ -806,7 +938,25 @@ memory growth in the session store or the listener surviving many hours of polli
   logged by name only, and their arguments are not echoed anywhere.
 - The plugin itself has no stdio transport; HTTP-capable clients connect directly and stdio-only clients go
   through `bridge\DalamudMcpBridge`.
-- No mutating tools, so `AllowMutatingTools` currently has no effect on what is exposed.
+- The mutating tools (control, chat, plugin management, addon windows, movement, teleport,
+  screen capture, IPC endpoint registration) were exercised only out of game, where every handler
+  answered with the expected deliberate error (not-logged-in or a refused parameter); their in-game
+  behaviour has not been verified, and the event collector, chat-log capture and IPC bridge have not
+  run against a live client at all.
+- The tools added after the verification session — `capture_game_screenshot`, `teleport_to_aetheryte`,
+  `move_to_entity`, `move_to_nearby_targetable_object`, `get_chat_log`, `events_wait`, `slash_command`,
+  `use_duty_action`, `get_quest_status`, `get_available_quests`, `plugin_data_subscribe`, `plugin_data_poll`,
+  `plugin_data_unsubscribe`, `plugin_list`, `plugin_describe`, `get_addon_strings` and
+  `select_addon_menu_item` — are covered by the offline suites (schema validation, the live-socket sweep,
+  and the loadability check) but have **not** been driven against a running game client. Their argument
+  contract, error text and JSON shape are tested; their effects on the game are not.
+- `move_to_entity` and `move_to_nearby_targetable_object` additionally depend on the third-party
+  [vnavmesh](https://github.com/awgil/ffxiv_navmesh) plugin being installed and loaded; without it they
+  return a phrased error rather than a partial path. That IPC handshake has not been exercised against a
+  live vnavmesh build here.
+- `capture_game_screenshot` returns the PNG base64-encoded inside the JSON-RPC result, so a full-resolution
+  capture is a large response; `maxDimension` (default 1920) is the control for that, and `save=true` writes
+  the file to disk instead for agent pipelines that can read a path.
 - `get_game_objects` and similar enumeration tools read the whole object table and filter in memory, which is
   fine at normal object counts but not designed for tight polling loops.
 - The plugin is not packaged for a plugin repository; `DalamudPackager` is not referenced.

@@ -8,6 +8,9 @@ using Dalamud.Game.ClientState.Party;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using DalamudMCP.Chat;
+using DalamudMCP.Events;
+using DalamudMCP.Ipc;
 using DalamudMCP.Mcp;
 using DalamudMCP.Tools;
 using DalamudMCP.Windows;
@@ -43,6 +46,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ToolRegistry registry;
     private readonly WindowSystem windowSystem = new("DalamudMCP");
     private readonly ConfigWindow configWindow;
+    private readonly EventHub eventHub = new();
+    private readonly ChatLogHub chatLogHub = new();
+    private readonly IpcHub ipcHub;
 
     // Recreated whenever the listener restarts so a changed port or framework timeout
     // takes effect without a plugin reload.
@@ -70,7 +76,9 @@ public sealed class Plugin : IDalamudPlugin
         IGameInventory gameInventory,
         IAetheryteList aetheryteList,
         ISigScanner sigScanner,
-        IGameInteropProvider interop)
+        IGameInteropProvider interop,
+        IBuddyList buddyList,
+        IDutyState dutyState)
     {
         this.pluginInterface = pluginInterface;
         this.log = log;
@@ -108,16 +116,38 @@ public sealed class Plugin : IDalamudPlugin
             AetheryteList = aetheryteList,
             SigScanner = sigScanner,
             Interop = interop,
+            BuddyList = buddyList,
+            DutyState = dutyState,
+            PluginInterface = pluginInterface,
             Config = Config,
         };
 
         registry = new ToolRegistry { AllowMutating = () => Config.AllowMutatingTools };
+        ipcHub = new IpcHub(Config.IpcEndpoints.Select(e => new Ipc.IpcEndpoint
+        {
+            PluginName = e.PluginName,
+            MethodName = e.MethodName,
+            Signature = e.Signature,
+            Description = e.Description,
+        }));
         ClientTools.Register(registry, services);
         ObjectTools.Register(registry, services);
         DataTools.Register(registry, services);
         MemoryTools.Register(registry, services);
         StructTools.Register(registry, services);
         UiTools.Register(registry, services);
+        InventoryTools.Register(registry, services);
+        BuddyTools.Register(registry, services);
+        ControlTools.Register(registry, services);
+        ScreenshotTools.Register(registry, services);
+        TeleportTools.Register(registry, services);
+        MovementTools.Register(registry, services);
+        ChatTools.Register(registry, services);
+        QuestTools.Register(registry, services);
+        PluginManagementTools.Register(registry, services);
+        PluginBridgeTools.Register(registry, services, ipcHub);
+        EventTools.Register(registry, services, eventHub);
+        ChatLogTools.Register(registry, chatLogHub);
         CallbackProbe.Initialize(interop, sigScanner);
 
         configWindow = new ConfigWindow(this);
@@ -184,6 +214,37 @@ public sealed class Plugin : IDalamudPlugin
             };
 
             server.Start(Config.Port);
+
+            // Side channels live with the listener: the event collector records nothing
+            // and the push channel is unreachable while the server is down. Each is
+            // guarded separately — a bridge failure must not take the listener down.
+            try
+            {
+                eventHub.Start(services, Config.EventCollection);
+            }
+            catch (Exception ex)
+            {
+                LogError($"event collector failed to start: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            try
+            {
+                ipcHub.Start(pluginInterface);
+            }
+            catch (Exception ex)
+            {
+                LogError($"push channel failed to start: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            try
+            {
+                chatLogHub.Start(chatGui);
+            }
+            catch (Exception ex)
+            {
+                LogError($"chat log failed to start: {ex.GetType().Name}: {ex.Message}");
+            }
+
             LogInfo($"MCP server listening on http://127.0.0.1:{server.Port}/mcp ({registry.Tools.Count} tools)");
         }
         catch (Exception ex)
@@ -216,6 +277,9 @@ public sealed class Plugin : IDalamudPlugin
             LogInfo("MCP server stopped");
         }
 
+        eventHub.Stop();
+        chatLogHub.Stop();
+        ipcHub.Stop();
         gameThread?.Dispose();
         gameThread = null;
     }
@@ -299,5 +363,8 @@ public sealed class Plugin : IDalamudPlugin
 
         windowSystem.RemoveAllWindows();
         StopServer();
+        eventHub.Dispose();
+        chatLogHub.Dispose();
+        ipcHub.Dispose();
     }
 }

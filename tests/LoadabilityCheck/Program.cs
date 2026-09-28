@@ -272,7 +272,7 @@ internal static class Program
 
         // Registration happens in the Plugin constructor, so a collision would stop
         // the plugin from loading at all rather than just hiding one tool.
-        Check("tool count is in the expected range (25-60)", seen.Count is >= 25 and <= 60,
+        Check("tool count is in the expected range (25-100)", seen.Count is >= 25 and <= 100,
             $"found {seen.Count}");
 
         // ------------------------------------------------- struct offsets

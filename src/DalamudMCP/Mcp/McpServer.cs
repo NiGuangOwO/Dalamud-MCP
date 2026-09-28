@@ -735,7 +735,11 @@ public sealed class McpServer : IDisposable
         {
             // Every Dalamud/game read must happen on the framework thread; game
             // memory is only stable while the client's own update loop is running.
-            var payload = await gameThread.InvokeAsync(() => tool.Handler(args)).ConfigureAwait(false);
+            // A waiting tool is the exception: it runs off the framework thread and
+            // marshals its own game-state reads, so a long wait cannot stall the client.
+            var payload = tool.AsyncHandler is { } asyncHandler
+                ? await asyncHandler(args).ConfigureAwait(false)
+                : await gameThread.InvokeAsync(() => tool.Handler!(args)).ConfigureAwait(false);
             return Json.JsonResult(payload);
         }
         catch (ToolException ex)

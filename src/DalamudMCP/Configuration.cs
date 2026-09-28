@@ -58,6 +58,15 @@ public sealed class Configuration : IPluginConfiguration
     /// </summary>
     public string Language { get; set; } = Localization.Auto;
 
+    /// <summary>
+    /// What the event collector records. Clamped on load so a hand-edited config file
+    /// cannot wedge the collector; reconfigured live through MCP.
+    /// </summary>
+    public Events.EventCollectionConfig EventCollection { get; set; } = new();
+
+    /// <summary>IPC endpoints declared through MCP, restored on the next launch.</summary>
+    public System.Collections.Generic.List<Ipc.IpcEndpointConfig> IpcEndpoints { get; set; } = new();
+
     public void Save(IDalamudPluginInterface pluginInterface)
     {
         pluginInterface.SavePluginConfig(this);
@@ -72,5 +81,21 @@ public sealed class Configuration : IPluginConfiguration
         if (MaxMemoryReadBytes is < 16 or > 1024 * 1024) MaxMemoryReadBytes = 65536;
         AuthToken ??= string.Empty;
         Language = Localization.Normalize(Language) is { } lang ? lang : Localization.Auto;
+
+        try
+        {
+            EventCollection.Clamp();
+        }
+        catch
+        {
+            EventCollection = new Events.EventCollectionConfig();
+        }
+
+        if (IpcEndpoints is null) IpcEndpoints = new System.Collections.Generic.List<Ipc.IpcEndpointConfig>();
+        IpcEndpoints.RemoveAll(e => e is null
+            || string.IsNullOrWhiteSpace(e.PluginName)
+            || string.IsNullOrWhiteSpace(e.MethodName)
+            || Ipc.IpcSignatures.Normalize(e.Signature) is null);
+        foreach (var e in IpcEndpoints) e.Signature = Ipc.IpcSignatures.Normalize(e.Signature)!;
     }
 }

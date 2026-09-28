@@ -120,7 +120,7 @@ internal static class Program
         if (ctors.Length != 1) return 1;
 
         var parameters = ctors[0].GetParameters();
-        Check("constructor takes 21 services", parameters.Length == 21, $"found {parameters.Length}");
+        Check("constructor takes 23 services", parameters.Length == 23, $"found {parameters.Length}");
 
         var nonInterfaces = parameters.Where(p => !p.ParameterType.IsInterface).Select(p => p.ParameterType.Name).ToArray();
         Check("every constructor parameter is an interface", nonInterfaces.Length == 0, string.Join(", ", nonInterfaces));
@@ -157,7 +157,7 @@ internal static class Program
         // Turned on BEFORE the plugin is constructed, so the live protocol checks below also
         // prove that Plugin.StartServer forwards this setting to the server it builds.
         Set(config, "LogRequests", true);
-        // Mutating tools on, so tools/list exposes the full 45-tool set over the real socket and
+        // Mutating tools on, so tools/list exposes the full 87-tool set over the real socket and
         // the sweep can exercise open_addon/close_addon/click_addon_element's argument validation.
         Set(config, "AllowMutatingTools", true);
 
@@ -283,7 +283,7 @@ internal static class Program
             services[i] = Proxy(type, Handler);
         }
 
-        Check("all 20 services were synthesized", services.All(s => s is not null));
+        Check("all 23 services were synthesized", services.All(s => s is not null));
 
         if (sqpack is null)
         {
@@ -337,10 +337,12 @@ internal static class Program
             ? new List<string>()
             : tools.Cast<object>().Select(t => Prop(t, "Name") as string ?? string.Empty).ToList();
 
-        Check("all 45 tools were registered", toolNames.Count == 45, $"found {toolNames.Count}");
+        Check("all 87 tools were registered", toolNames.Count == 87, $"found {toolNames.Count}");
         Check("tool names are unique", toolNames.Distinct(StringComparer.Ordinal).Count() == toolNames.Count);
         Check("registry exposes get_conditions", toolNames.Contains("get_conditions"));
         Check("registry exposes read_memory", toolNames.Contains("read_memory"));
+        Check("registry exposes query_events", toolNames.Contains("query_events"));
+        Check("registry exposes call_plugin_ipc", toolNames.Contains("call_plugin_ipc"));
         Check("Plugin.ToolCount agrees with the registry", Equals(Prop(plugin, "ToolCount"), toolNames.Count));
 
         // ------------------------------------------------------------- running
@@ -380,7 +382,7 @@ internal static class Program
 
             var listText = await CallAsync(http, baseUrl, sessionId, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}").ConfigureAwait(false);
             var listed = CountToolEntries(listText);
-            Check("tools/list returns 45 tools over the real socket", listed == 45, $"found {listed}");
+            Check("tools/list returns 87 tools over the real socket", listed == 87, $"found {listed}");
 
             var callText = await CallAsync(
                 http, baseUrl, sessionId,
@@ -608,7 +610,7 @@ internal static class Program
 
             // ------------------------------------------------------ tool sweep
             // Every registered tool is CALLED here, with no arguments. This is the difference
-            // between "31 tools registered" and "31 tools do not take the client down": a handler
+            // between "87 tools registered" and "87 tools do not take the client down": a handler
             // that dereferences a pointer without checking it is a corrupted-state exception in
             // .NET, which kills the process uncatchably. Out of game that failure mode is a red
             // test; in game it is a crashed client. An agent can also send a tool call with no
@@ -754,7 +756,7 @@ internal static class Program
             var schemaText = await CallAsync(http, baseUrl, sessionId, "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/list\",\"params\":{}}").ConfigureAwait(false);
             var (schemaProblems, schemasChecked) = ValidateToolSchemas(schemaText);
 
-            // Hand the REAL 31-tool payload to the interop suite, which validates it with the
+            // Hand the REAL 87-tool payload to the interop suite, which validates it with the
             // official @modelcontextprotocol/sdk parser (tests\McpInterop). The checks below use
             // this project's own reading of JSON Schema; the SDK is somebody else's reading of
             // the same spec, so a schema that only satisfies my parser is caught there.
@@ -800,6 +802,80 @@ internal static class Program
 
             Console.WriteLine($"  [note] schemas: {schemasChecked} validated, " +
                               $"{demandedParams.Count} handler demand(s) cross-checked against them");
+
+            // -------------------------------------------- partial-patch list regression
+            // configure_event_collection MERGES a partial patch onto the live config, and
+            // Newtonsoft's default ObjectCreationHandling.Auto makes that merge APPEND the incoming
+            // arrays onto the instances the property initializers already created, instead of
+            // REPLACING them. The damage is silent and cumulative: patching one unrelated scalar
+            // turned PlayerStats from 5 entries into 10, then 15, then 20 - and persisted that to
+            // disk. No schema, transport, load or metadata check can see it, which is why the check
+            // lives here, where the shipped handler runs against its own live collector. Note the
+            // sweep above already called this tool with {} arguments, so a regression would show up
+            // in the baseline itself before a single patch is sent.
+            var eventConfigReply = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"tools/call\",\"params\":{\"name\":\"get_event_config\",\"arguments\":{}}}")
+                .ConfigureAwait(false);
+            var (eventConfigPayload, eventConfigError) = UnwrapToolResult(eventConfigReply);
+            var baselinePlayers = eventConfigPayload is null
+                ? null
+                : ReadStringArray(eventConfigPayload, "config", "PlayerStats");
+
+            Check("get_event_config reports the collector's default player stat watch list",
+                !eventConfigError && baselinePlayers is { Length: 5 },
+                baselinePlayers is null
+                    ? FirstLine(eventConfigPayload)
+                    : $"{baselinePlayers.Length} entries: {string.Join(",", baselinePlayers)}");
+
+            // Three patches that touch ONLY a scalar. The list must survive all three untouched.
+            string[]? patchedPlayers = baselinePlayers;
+            string? patchFailure = null;
+            for (var i = 0; i < 3 && patchFailure is null; i++)
+            {
+                var patched = await CallAsync(http, baseUrl, sessionId,
+                    "{\"jsonrpc\":\"2.0\",\"id\":" + (41 + i) + ",\"method\":\"tools/call\",\"params\":{\"name\":" +
+                    "\"configure_event_collection\",\"arguments\":{\"throttleMs\":600}}}").ConfigureAwait(false);
+                var (patchedPayload, patchedError) = UnwrapToolResult(patched);
+                if (patchedError || patchedPayload is null)
+                {
+                    patchFailure = FirstLine(patchedPayload);
+                    break;
+                }
+
+                patchedPlayers = ReadStringArray(patchedPayload, "config", "PlayerStats");
+            }
+
+            Check("patching one scalar does not re-append the collector's list defaults",
+                patchFailure is null && patchedPlayers is { Length: 5 },
+                patchFailure
+                    ?? (patchedPlayers is null ? "(no list in reply)" : $"{patchedPlayers.Length} entries after 3 patches"));
+
+            // ...and an explicit array must still land verbatim, so the Replace fix has not
+            // broken the ability to actually change the list.
+            var explicitReply = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":45,\"method\":\"tools/call\",\"params\":{\"name\":\"configure_event_collection\"," +
+                "\"arguments\":{\"playerStats\":[\"hp\",\"position\"]}}}").ConfigureAwait(false);
+            var (explicitPayload, explicitError) = UnwrapToolResult(explicitReply);
+            var explicitPlayers = explicitPayload is null
+                ? null
+                : ReadStringArray(explicitPayload, "config", "PlayerStats");
+
+            Check("an explicit event config array replaces the stored list verbatim",
+                !explicitError && explicitPlayers is { Length: 2 } &&
+                explicitPlayers[0] == "hp" && explicitPlayers[1] == "position",
+                explicitPlayers is null ? FirstLine(explicitPayload) : string.Join(",", explicitPlayers));
+
+            // The strict validator still runs on the patched object, so a bad value is still
+            // refused in words rather than silently clamped or appended.
+            var rejectedReply = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":46,\"method\":\"tools/call\",\"params\":{\"name\":\"configure_event_collection\"," +
+                "\"arguments\":{\"objectRange\":9999}}}").ConfigureAwait(false);
+            var (rejectedPayload, rejectedError) = UnwrapToolResult(rejectedReply);
+            Check("an out-of-range event config value is still refused with its reason",
+                rejectedError && rejectedPayload is not null &&
+                rejectedPayload.Contains("invalid config", StringComparison.Ordinal) &&
+                rejectedPayload.Contains("objectRange", StringComparison.Ordinal),
+                FirstLine(rejectedPayload));
         }
         catch (Exception ex)
         {
@@ -864,7 +940,7 @@ internal static class Program
             && statusLine.Contains(port.ToString(), StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
         Check("the status subcommand reports the tool count",
-            statusLine is not null && statusLine.Contains("45 tools", StringComparison.Ordinal),
+            statusLine is not null && statusLine.Contains("87 tools", StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
 
         // 'stop' followed by 'start' must take the port down and bring it back - the two paths a
@@ -1524,6 +1600,42 @@ internal static class Program
         catch
         {
             return (null, true);
+        }
+    }
+
+    /// <summary>
+    /// Reads a string array out of a tools/call payload at the given property path, e.g.
+    /// <c>ReadStringArray(payload, "config", "PlayerStats")</c>. Returns null when any hop is
+    /// missing or not the expected shape, so a caller can distinguish "absent" from "empty".
+    /// </summary>
+    private static string[]? ReadStringArray(string json, params string[] path)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var current = document.RootElement;
+            foreach (var hop in path)
+            {
+                if (current.ValueKind != JsonValueKind.Object ||
+                    !current.TryGetProperty(hop, out var next))
+                    return null;
+                current = next;
+            }
+
+            if (current.ValueKind != JsonValueKind.Array) return null;
+
+            var values = new List<string>();
+            foreach (var item in current.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String) return null;
+                values.Add(item.GetString() ?? string.Empty);
+            }
+
+            return values.ToArray();
+        }
+        catch
+        {
+            return null;
         }
     }
 

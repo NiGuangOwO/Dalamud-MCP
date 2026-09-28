@@ -101,7 +101,7 @@ internal static class DataTools
         registry.Add(
             "get_status",
             "Get status",
-            "Looks up a status effect (buff/debuff) by id or name: name, description, max stacks, and " +
+            "Looks up a status (buff/debuff) by id or name: name, description, max stacks, and " +
             "the flags that control dispelling and movement locks.",
             Json.Schema(
                 ("statusId", "integer", "Status id", false),
