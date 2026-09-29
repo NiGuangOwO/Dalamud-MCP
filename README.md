@@ -32,35 +32,53 @@ a ring buffer that an agent can poll instead of re-reading full state.
 
 ## Build
 
-The plugin targets `net10.0-windows7.0` and x64, and references the Dalamud assemblies from a local XIVLauncher
-install rather than NuGet packages.
+The plugin is built with [`Dalamud.NET.Sdk`](https://www.nuget.org/packages/Dalamud.NET.Sdk), the same SDK
+[SamplePlugin](https://github.com/goatcorp/SamplePlugin) uses, so the project needs no hand-written references to
+the Dalamud assemblies.
 
 ```powershell
 cd <repo>\src\DalamudMCP
 dotnet build DalamudMCP.csproj -p:Platform=x64
 ```
 
-`DalamudMCP.csproj` resolves `$(DalamudLibPath)` automatically, preferring the CN install and falling back to the
-global one:
+The SDK resolves the Dalamud installation from the local XIVLauncher install rather than NuGet. On Windows it picks
+the global launcher path, so `Directory.Build.props` in the same directory pre-seeds the SDK's documented
+`DALAMUD_HOME` override when the CN install is the one present:
 
 - `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`
 - `%APPDATA%\XIVLauncher\addon\Hooks\dev`
 
-Override it if your assemblies live elsewhere:
+Override it if your assemblies live elsewhere, either by exporting `DALAMUD_HOME` or on the command line:
 
 ```powershell
 dotnet build DalamudMCP.csproj -p:Platform=x64 -p:DalamudLibPath="D:\some\Hooks\dev\"
 ```
 
-There is no `.sln`, and the plugin project itself has no NuGet package references — only `bridge\` and the test
-projects use NuGet. `Dalamud.dll`, `Lumina`, `Lumina.Excel`, `Newtonsoft.Json` and `Dalamud.Bindings.ImGui` are
-`Private=false` references to the dev folder, so the game's own copies are used at runtime.
-**FFXIVClientStructs comes via Dalamud**: `FFXIVClientStructs.dll` is referenced from the same `Hooks\dev`
-directory that Dalamud ships, which keeps the structure offsets in sync with the installed Dalamud version. The
-manifest declares `DalamudApiLevel: 15`.
+There is no `.sln`. Only the plugin, `bridge\` and the test projects are built directly; the SDK contributes the
+`DalamudPackager` package reference and the Dalamud, `Lumina`, `Newtonsoft.Json` and `FFXIVClientStructs`
+references for you. `FFXIVClientStructs.dll` therefore comes from the same `Hooks\dev` directory that Dalamud
+ships, which keeps the structure offsets in sync with the installed Dalamud version.
 
-Build output lands in `src\DalamudMCP\bin\x64\Debug\` and contains `DalamudMCP.dll`, `DalamudMCP.json`,
-`DalamudMCP.deps.json` and `DalamudMCP.pdb`. The manifest is copied to the output directory automatically.
+### Packaging
+
+`DalamudPackager` runs after every build and generates the plugin manifest from the properties in
+`DalamudMCP.csproj` — there is no hand-maintained `.json` to keep in sync:
+
+| Build | Output |
+| --- | --- |
+| `Debug` (default) | `bin\x64\Debug\DalamudMCP.json`, written next to the assembly |
+| `Release` | the same manifest plus `bin\x64\Release\DalamudMCP\latest.zip`, the plugin-repository package |
+
+```powershell
+dotnet build DalamudMCP.csproj -p:Platform=x64 -c Release
+```
+
+`latest.zip` contains `DalamudMCP.dll`, `DalamudMCP.json` and `DalamudMCP.deps.json`, which is exactly what a
+plugin repository serves. `.github\workflows\build.yml` runs that Release build on every push and pull request and
+uploads the zip as a build artifact.
+
+Debug output lands in `src\DalamudMCP\bin\x64\Debug\` and contains `DalamudMCP.dll`, `DalamudMCP.json` and
+`DalamudMCP.deps.json`.
 
 ## Install as a dev plugin
 
@@ -71,8 +89,10 @@ required:
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.dll
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.json
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
-src\DalamudMCP\bin\x64\Debug\DalamudMCP.pdb
 ```
+
+To install it the way a plugin repository would, unpack `bin\x64\Release\DalamudMCP\latest.zip` into a directory of
+its own and point the dev-plugin location at that directory instead.
 
 ### Activating in-game
 
@@ -542,7 +562,7 @@ deliberately have no Dalamud dependency, so they can be compiled into a host and
 | --- | --- | --- |
 | `tests\ProtocolSmokeTest` | `47/47` | Transport and protocol against the real sources. |
 | `tests\BridgeSmokeTest` | `22/22` | The stdio bridge against the real server. |
-| `tests\LoadabilityCheck` | `103/103` | The built DLL and manifest, plus the offset and localization audits. |
+| `tests\LoadabilityCheck` | `110/110` | The built DLL and the manifest generated from the csproj, plus the offset and localization audits. |
 | `tests\PluginLoadTest` | `99/99` (`93/93` without game data) | The shipped `Plugin` constructor executed out of game. |
 | `tests\McpInterop` | `12/12`, `2/2`, `11/11` | The official MCP SDK as an independent client, plus meta-schema validation. |
 
@@ -787,5 +807,5 @@ Not verified, and therefore not claimed:
   disk instead for agent pipelines that can read a path.
 - `get_game_objects` and similar enumeration tools read the whole object table and filter in memory, which is fine
   at normal object counts but not designed for tight polling loops.
-- The plugin is not packaged for a plugin repository; `DalamudPackager` is not referenced.
+- `latest.zip` is a plain plugin-repository package and is not signed or published anywhere; `.github\workflows\build.yml` only uploads it as a CI artifact.
 - The session store keeps sessions in memory with a 2-hour idle cutoff, so a long-idle client must re-initialize.

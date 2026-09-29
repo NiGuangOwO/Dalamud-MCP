@@ -29,32 +29,50 @@ MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 87 个工具 —�
 
 ## 构建
 
-插件面向 `net10.0-windows7.0` 和 x64，引用本地 XIVLauncher 安装中的 Dalamud 程序集而非 NuGet 包。
+插件使用 [`Dalamud.NET.Sdk`](https://www.nuget.org/packages/Dalamud.NET.Sdk) 构建，即
+[SamplePlugin](https://github.com/goatcorp/SamplePlugin) 所用的同一个 SDK，因此项目不再手写对 Dalamud 程序集的引用。
 
 ```powershell
 cd <仓库根目录>\src\DalamudMCP
 dotnet build DalamudMCP.csproj -p:Platform=x64
 ```
 
-`DalamudMCP.csproj` 会自动解析 `$(DalamudLibPath)`，优先国服安装，其次回退到国际服：
+SDK 从本地 XIVLauncher 安装中解析 Dalamud，而不是走 NuGet。在 Windows 上它只会选国际服路径，因此同目录下的
+`Directory.Build.props` 会在检测到国服安装时预置 SDK 官方的 `DALAMUD_HOME` 覆盖项：
 
 - `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`
 - `%APPDATA%\XIVLauncher\addon\Hooks\dev`
 
-如果你的程序集在别处，可以覆盖它：
+如果你的程序集在别处，可以导出 `DALAMUD_HOME` 或在命令行覆盖：
 
 ```powershell
 dotnet build DalamudMCP.csproj -p:Platform=x64 -p:DalamudLibPath="D:\some\Hooks\dev\"
 ```
 
-本仓库没有 `.sln`，插件项目本身也没有 NuGet 包引用 —— 只有 `bridge\` 和测试项目使用 NuGet。
-`Dalamud.dll`、`Lumina`、`Lumina.Excel`、`Newtonsoft.Json` 和 `Dalamud.Bindings.ImGui` 都是对 dev 目录的
-`Private=false` 引用，运行时使用游戏自带的副本。**FFXIVClientStructs 通过 Dalamud 获得**：
-`FFXIVClientStructs.dll` 引用自 Dalamud 自带的同一个 `Hooks\dev` 目录，这保证结构体偏移与已安装的 Dalamud
-版本保持同步。清单声明 `DalamudApiLevel: 15`。
+本仓库没有 `.sln`。直接构建的只有插件、`bridge\` 和测试项目；`DalamudPackager` 包引用以及 Dalamud、
+`Lumina`、`Newtonsoft.Json`、`FFXIVClientStructs` 引用都由 SDK 提供。因此
+`FFXIVClientStructs.dll` 与 Dalamud 自带的来自同一个 `Hooks\dev` 目录，这保证结构体偏移与已安装的 Dalamud
+版本保持同步。
 
-构建输出位于 `src\DalamudMCP\bin\x64\Debug\`，包含 `DalamudMCP.dll`、`DalamudMCP.json`、
-`DalamudMCP.deps.json` 和 `DalamudMCP.pdb`。清单会自动复制到输出目录。
+### 打包
+
+`DalamudPackager` 在每次构建后运行，并根据 `DalamudMCP.csproj` 中的属性生成插件清单 —— 不再有需要手工同步的
+`.json` 文件：
+
+| 构建配置 | 输出 |
+| --- | --- |
+| `Debug`（默认） | `bin\x64\Debug\DalamudMCP.json`，写在程序集旁边 |
+| `Release` | 同一份清单，外加 `bin\x64\Release\DalamudMCP\latest.zip`，即插件仓库的分发包 |
+
+```powershell
+dotnet build DalamudMCP.csproj -p:Platform=x64 -c Release
+```
+
+`latest.zip` 内含 `DalamudMCP.dll`、`DalamudMCP.json` 和 `DalamudMCP.deps.json`，这正是插件仓库所提供的内容。
+`.github\workflows\build.yml` 会在每次 push 和 pull request 上执行该 Release 构建，并把 zip 作为构建产物上传。
+
+Debug 输出位于 `src\DalamudMCP\bin\x64\Debug\`，包含 `DalamudMCP.dll`、`DalamudMCP.json` 和
+`DalamudMCP.deps.json`。
 
 ## 作为开发插件安装
 
@@ -64,8 +82,10 @@ dotnet build DalamudMCP.csproj -p:Platform=x64 -p:DalamudLibPath="D:\some\Hooks\
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.dll
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.json
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
-src\DalamudMCP\bin\x64\Debug\DalamudMCP.pdb
 ```
+
+若要按插件仓库的安装方式使用，请把 `bin\x64\Release\DalamudMCP\latest.zip` 解压到一个独立目录，再把开发插件
+位置指向该目录。
 
 ### 在游戏中启用
 
@@ -505,7 +525,7 @@ MCP 客户端
 | --- | --- | --- |
 | `tests\ProtocolSmokeTest` | `47/47` | 针对真实源码的传输层与协议。 |
 | `tests\BridgeSmokeTest` | `22/22` | stdio 桥针对真实服务器。 |
-| `tests\LoadabilityCheck` | `103/103` | 构建出的 DLL 与清单，外加偏移与本地化审计。 |
+| `tests\LoadabilityCheck` | `110/110` | 构建出的 DLL 与由 csproj 生成的清单，外加偏移与本地化审计。 |
 | `tests\PluginLoadTest` | `99/99`（无游戏数据时 `93/93`） | 在游戏外运行交付的 `Plugin` 构造函数。 |
 | `tests\McpInterop` | `12/12`、`2/2`、`11/11` | 以官方 MCP SDK 作为独立客户端，外加元 schema 校验。 |
 
@@ -708,5 +728,5 @@ FFXIVClientStructs 程序集。
 - `capture_game_screenshot` 把 PNG 以 base64 编码放在 JSON-RPC 结果内返回，因此全分辨率截图是一个很大的
   响应；`maxDimension`（默认 1920）是控制手段，而 `save=true` 会把文件写入磁盘，供能读路径的 Agent 流水线使用。
 - `get_game_objects` 等枚举工具读取整张对象表后在内存中过滤，常规对象数没问题，但不适合高频轮询循环。
-- 插件未打包进插件仓库；未引用 `DalamudPackager`。
+- `latest.zip` 是普通的插件仓库分发包，不签名、也没有发布到任何地方；`.github\workflows\build.yml` 只把它作为 CI 产物上传。
 - 会话存储把会话保存在内存中，2 小时空闲即过期，长期空闲的客户端必须重新 `initialize`。

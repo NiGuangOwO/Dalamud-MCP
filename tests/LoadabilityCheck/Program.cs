@@ -25,6 +25,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 internal static class Program
 {
@@ -59,7 +60,10 @@ internal static class Program
 
         var pluginDll = Path.Combine(repo, @"src\DalamudMCP\bin\x64\Debug\DalamudMCP.dll");
         var builtManifest = Path.Combine(repo, @"src\DalamudMCP\bin\x64\Debug\DalamudMCP.json");
-        var sourceManifest = Path.Combine(repo, @"src\DalamudMCP\DalamudMCP.json");
+        // The manifest is no longer hand-written: DalamudPackager generates it from
+        // the csproj properties during every build, so the csproj is the source of
+        // truth and the built JSON has to agree with it field by field.
+        var projectFile = Path.Combine(repo, @"src\DalamudMCP\DalamudMCP.csproj");
 
         Console.WriteLine($"dev dir : {devDir}");
         Console.WriteLine($"plugin  : {pluginDll}");
@@ -83,13 +87,16 @@ internal static class Program
         // ------------------------------------------------------------ manifest
         Console.WriteLine("manifest");
         Check("built manifest exists next to the DLL", File.Exists(builtManifest), builtManifest);
-        Check("source manifest exists", File.Exists(sourceManifest));
+        Check("packaging project file exists", File.Exists(projectFile), projectFile);
 
         if (File.Exists(builtManifest))
         {
             var builtText = File.ReadAllText(builtManifest);
-            var sourceText = File.Exists(sourceManifest) ? File.ReadAllText(sourceManifest) : "";
-            Check("built manifest matches the source manifest", builtText == sourceText);
+            Check("plugin is built with the Dalamud SDK",
+                File.Exists(projectFile)
+                && (XDocument.Load(projectFile).Root?.Attribute("Sdk")?.Value ?? "")
+                    .StartsWith("Dalamud.", StringComparison.Ordinal),
+                "the csproj Sdk attribute must be Dalamud.NET.Sdk/<version>");
 
             using var doc = JsonDocument.Parse(builtText);
             var root = doc.RootElement;
@@ -109,6 +116,37 @@ internal static class Program
             Check("AssemblyVersion parses as a version",
                 Version.TryParse(assemblyVersion, out _), $"'{assemblyVersion}'");
             Check("ApplicableVersion is set", !string.IsNullOrWhiteSpace(applicableVersion), $"'{applicableVersion}'");
+
+            // Every field the packager copies out of the csproj has to survive the
+            // round trip, otherwise a typo in a property looks like a valid build
+            // and only shows up as a broken listing in /xlplugins.
+            if (File.Exists(projectFile))
+            {
+                var props = LoadProjectProperties(projectFile);
+                foreach (var field in new[]
+                         {
+                             "Author", "Name", "Punchline", "Description",
+                             "RepoUrl", "ApplicableVersion",
+                         })
+                {
+                    props.TryGetValue(field, out var declared);
+                    var emitted = Str(field);
+                    Check($"manifest {field} matches the csproj ({Trim(emitted)} vs {Trim(declared)})",
+                        declared is not null && emitted == declared);
+                }
+
+                // Tags travel as a ';'-separated string in the csproj and as an
+                // array in the manifest, so they are compared element-wise.
+                props.TryGetValue("Tags", out var declaredTags);
+                var emittedTags = root.TryGetProperty("Tags", out var tagsEl)
+                                  && tagsEl.ValueKind == JsonValueKind.Array
+                    ? tagsEl.EnumerateArray().Select(t => t.GetString()).ToArray()
+                    : Array.Empty<string?>();
+                var expectedTags = (declaredTags ?? "")
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                Check($"manifest Tags match the csproj ({string.Join(",", emittedTags)} vs {string.Join(",", expectedTags)})",
+                    emittedTags.SequenceEqual(expectedTags, StringComparer.Ordinal));
+            }
 
             // Dalamud compares the manifest's DalamudApiLevel against its own build
             // level and refuses the plugin on any mismatch - silently, with only a
@@ -752,6 +790,48 @@ internal static class Program
     private sealed class SatisfiableControl
     {
     }
+
+    /// <summary>
+    /// The literal properties a csproj declares in its own PropertyGroup, read as
+    /// text. Only used to compare the packaging manifest against the source it was
+    /// generated from, so MSBuild evaluation is deliberately not reimplemented -
+    /// conditions and imports are ignored and only plain literal values are seen.
+    /// </summary>
+    private static Dictionary<string, string> LoadProjectProperties(string projectFile)
+    {
+        var properties = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            var doc = XDocument.Load(projectFile);
+            foreach (var group in doc.Root?.Elements("PropertyGroup") ?? Enumerable.Empty<XElement>())
+            {
+                foreach (var property in group.Elements())
+                {
+                    // Skip conditional or imported-over properties; they would need a
+                    // real MSBuild evaluation to be judged, and this check is meant to
+                    // catch plain typos rather than to model the build engine.
+                    if (property.Attribute("Condition") is not null) continue;
+                    properties[property.Name.LocalName] = property.Value.Trim();
+                }
+            }
+        }
+        catch
+        {
+            // A malformed project file fails the comparison below rather than
+            // crashing the check.
+        }
+
+        return properties;
+    }
+
+    /// <summary>
+    /// Collapses a property value for the one-line check label; multi-line
+    /// descriptions would otherwise break the report layout.
+    /// </summary>
+    private static string Trim(string? value) =>
+        value is null ? "<missing>"
+        : value.Length <= 48 ? value
+        : value[..45] + "...";
 
     /// <summary>
     /// The API level the installed Dalamud was built for. A manifest declaring a

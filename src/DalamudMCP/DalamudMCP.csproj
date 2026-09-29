@@ -1,68 +1,34 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows7.0</TargetFramework>
-    <Platforms>x64</Platforms>
-    <PlatformTarget>x64</PlatformTarget>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <NoWarn>CS1591</NoWarn>
-    <ImplicitUsings>disable</ImplicitUsings>
+    <Version>1.0.0.0</Version>
+    <!--
+      Plugin manifest. DalamudPackager (pulled in by the SDK) reads these properties and
+      writes DalamudMCP.json next to the assembly on every build:
+        Debug   -> manifest only
+        Release -> manifest + bin\x64\Release\DalamudMCP\latest.zip (the plugin repository package)
+      See https://github.com/goatcorp/DalamudPackager
+    -->
+    <Author>Dalamud-MCP</Author>
+    <Name>Dalamud MCP</Name>
+    <Punchline>Expose FFXIV game memory to AI agents over MCP.</Punchline>
+    <Description>Hosts a Model Context Protocol (MCP) server on a local port so that agents can read FINAL FANTASY XIV game memory via Dalamud and FFXIVClientStructs.</Description>
+    <RepoUrl>https://github.com/NiGuangOwO/Dalamud-MCP</RepoUrl>
+    <Tags>mcp;agent;memory;api</Tags>
+    <ApplicableVersion>any</ApplicableVersion>
+    <DalamudApiLevel>15</DalamudApiLevel>
+    <AcceptsFeedback>false</AcceptsFeedback>
+    <!-- InternalName and AssemblyVersion are filled in by the packager from the assembly. -->
+  </PropertyGroup>
+
+  <PropertyGroup>
     <AssemblyName>DalamudMCP</AssemblyName>
     <RootNamespace>DalamudMCP</RootNamespace>
-    <Version>1.0.0.0</Version>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <NoWarn>CS1591</NoWarn>
+    <!-- Keep the historical output layout; tests and the READMEs point at it. -->
     <OutputPath>bin\x64\$(Configuration)\</OutputPath>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
-
-  <PropertyGroup>
-    <DalamudLibPath Condition="'$(DalamudLibPath)' == '' and Exists('$(AppData)\XIVLauncherCN\addon\Hooks\dev\Dalamud.dll')">$(AppData)\XIVLauncherCN\addon\Hooks\dev\</DalamudLibPath>
-    <DalamudLibPath Condition="'$(DalamudLibPath)' == '' and Exists('$(AppData)\XIVLauncher\addon\Hooks\dev\Dalamud.dll')">$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <None Update="DalamudMCP.json">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Reference Include="Dalamud">
-      <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="FFXIVClientStructs">
-      <HintPath>$(DalamudLibPath)FFXIVClientStructs.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Dalamud.Common">
-      <HintPath>$(DalamudLibPath)Dalamud.Common.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Dalamud.Bindings.ImGui">
-      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="InteropGenerator.Runtime">
-      <HintPath>$(DalamudLibPath)InteropGenerator.Runtime.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Lumina">
-      <HintPath>$(DalamudLibPath)Lumina.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Lumina.Excel">
-      <HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Newtonsoft.Json">
-      <HintPath>$(DalamudLibPath)Newtonsoft.Json.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
 
 </Project>

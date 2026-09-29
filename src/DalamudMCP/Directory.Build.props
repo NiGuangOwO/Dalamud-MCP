@@ -1,0 +1,16 @@
+<Project>
+
+  <!--
+    Dalamud.NET.Sdk resolves the Dalamud installation automatically, but on Windows
+    it always picks the global XIVLauncher path. This project supports both launchers,
+    so pre-seed DALAMUD_HOME (the SDK's documented override, which it turns into
+    $(DALAMUD_HOME)/ and applies last) when the CN install is the one present.
+
+    A developer who already exported DALAMUD_HOME keeps their value, and a machine
+    with only the global launcher falls through to the SDK default.
+  -->
+  <PropertyGroup>
+    <DALAMUD_HOME Condition="'$(DALAMUD_HOME)' == '' and Exists('$(AppData)\XIVLauncherCN\addon\Hooks\dev\Dalamud.dll')">$(AppData)\XIVLauncherCN\addon\Hooks\dev</DALAMUD_HOME>
+  </PropertyGroup>
+
+</Project>
