@@ -9,9 +9,9 @@ the client itself uses: the object table, the local player, party and alliance, 
 game data, and arbitrary validated raw memory through
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 
-An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 87 tools — 58 read-only, plus 29 mutating tools
+An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 102 tools — 63 read-only, plus 39 mutating tools
 (opt-in) that can act on the game: cast actions, target and move, send chat, manage plugins, drive addon windows,
-and register IPC endpoints with other plugins. A background event collector also records game-state changes into
+inject Dear ImGui input, and register IPC endpoints with other plugins. A background event collector also records game-state changes into
 a ring buffer that an agent can poll instead of re-reading full state.
 
 > **Verification scope.** All 33 read-only tools that existed at the time of the single live verification session
@@ -141,11 +141,11 @@ installing a plugin. The gate is enforced in two places: mutating tools are filt
 `tools/call` rejects them with an explanatory error even if the client knows the name. Turning the setting on also
 changes the label from "read-only (recommended)" to a warning that "agents may change game state".
 
-**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 29 tools listed in
+**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 39 tools listed in
 this document — action casting and targeting, auto-movement, teleporting, chat and slash commands, plugin
-management, addon-window control, screen capture, and the IPC endpoint registry — can act on the game. All of them
-are flagged mutating, so they stay invisible in `tools/list` and reject `tools/call` until `AllowMutatingTools` is
-turned on; the other 58 tools remain read-only.
+management, addon-window control, Dear ImGui input injection, and the IPC endpoint registry — can act on the game.
+All of them are flagged mutating, so they stay invisible in `tools/list` and reject `tools/call` until
+`AllowMutatingTools` is turned on; the other 63 tools remain read-only.
 
 ## Connect an agent
 
@@ -253,9 +253,9 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-87 tools: 58 read-only plus 29 mutating tools (control, chat, plugin management, addon windows, and the IPC
-endpoint registry) that are hidden until `AllowMutatingTools` is on. Names are exactly as they appear in
-`tools/list`.
+102 tools: 63 read-only plus 39 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
+input injection, and the IPC endpoint registry) that are hidden until `AllowMutatingTools` is on. Names are
+exactly as they appear in `tools/list`.
 
 ### Client and session
 
@@ -371,6 +371,50 @@ census is a hint rather than ground truth and `open_addon`/`close_addon` are the
 clicks reach component-registered listeners rather than the addon's vtable, which is why the `registered` event
 mode and the listener-level probe exist.
 
+### Dear ImGui input injection (mutating, opt-in)
+
+These tools drive any Dear ImGui window in the process by pushing events into Dear ImGui's own input
+queue — the same `AddMousePosEvent` / `AddMouseButtonEvent` / `AddKeyEvent` / `AddInputCharacter` calls a
+real backend makes. Nothing here knows about any other plugin: the tools take coordinates, ids and key
+names that Dear ImGui itself exposes, so they apply equally to Dalamud's windows, this plugin's, and every
+third-party plugin's, without referencing a single plugin assembly, window name or command. Combine
+`imgui_windows` (find the rectangle) with `imgui_hover_grid` (find the controls inside it) and you never
+need to know who drew the window.
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `imgui_state` | What Dear ImGui currently believes about the pointer and focus: frame count, display size, mouse position, per-button down state, the `WantCaptureMouse` / `WantCaptureKeyboard` / `WantTextInput` flags, and the hovered / active / nav window and id. The ground truth for the injection tools — read it before and after a click to see what changed. Read-only. | none |
+| `imgui_windows` | Every Dear ImGui window in the process with its name, id, position, size and its active / hidden / collapsed / focused flags, in the same coordinate space the mouse tools accept. Filter with `contains` to match a name fragment. Read-only. | `contains`, `onlyActive`, `onlyVisible`, `max` (default 200) |
+| `imgui_mouse_move` | Moves the injected pointer and lets it settle, then reports what is hovered. | `x`, `y` (required), `settleFrames` (default 2), `moveCursor`, `restoreCursor` |
+| `imgui_mouse_click` | Injects a real press-and-release at a coordinate. The down and up land on separate frames, so the click is not collapsed by ImGui's trickle queue. | `x`, `y`, `button` (0 left/1 right/2 middle), `double`, `settleFrames` (default 3), `moveCursor`, `restoreCursor` |
+| `imgui_mouse_scroll` | Injects a wheel event, optionally moving to a widget first. Deltas are in ImGui notches. | `x`, `y`, `deltaY` (default -3), `deltaX`, `settleFrames` |
+| `imgui_key_press` | A complete key press with optional Ctrl / Shift / Alt held across the chord, using Dear ImGui key names (`Enter`, `Escape`, `A`, `F1`, `LeftArrow`, `LeftCtrl`, ...). | `key` (required), `ctrl`, `shift`, `alt` |
+| `imgui_key` | A bare key down or up with no pairing, for holding a modifier across other calls. | `key`, `down` (both required) |
+| `imgui_text` | Types a string through the character-input path, so IME-free text including CJK reaches whatever ImGui field has keyboard focus. Send it after focusing the field. | `text` (required), `charsPerFrame` (1-16, default 16) |
+| `imgui_hover_grid` | The generic control-discovery primitive. Sweeps the pointer over a `cols x rows` grid covering a rectangle, holding each position one frame and sampling the next, and returns whether each cell is inside a window and which id is hovered. One call reconstructs the hit layout of any window; `rows=1` is a horizontal scan line. | `x0`, `y0`, `x1`, `y1` (required), `cols` (default 8), `rows` (default 8), `settleFrames` |
+| `imgui_wait` | Idles for a number of frames so a popup or layout change can settle. Read-only. | `frames` (1-600, default 30) |
+
+`imgui_state`, `imgui_windows` and `imgui_wait` are read-only; the other seven are mutating and hidden
+until `AllowMutatingTools` is on.
+
+Mechanically, each request is expanded into single-frame steps and exactly one step runs per frame from a
+`UiBuilder.Draw` hook, which is what makes a click a genuine press-then-release and what lets a position
+settle before anything is read from it. Mouse injection additionally raises `io.WantSetMousePos` for the
+duration of the job: Dalamud's Win32 backend re-enqueues the real OS cursor position every frame while
+that flag is false, which would overwrite the injected coordinate. The flag is also what makes the backend
+move the physical cursor to the injected point, so the two agree instead of fighting; each job saves and
+restores the flag, the `AppAcceptingEvents` state and the original cursor position when its last step has
+been consumed, and `moveCursor` / `restoreCursor` can turn the physical cursor movement off entirely for
+purely synthetic input.
+
+Injectors also prove the frame loop is live before committing to a job: they wait up to two seconds for
+the first `UiBuilder.Draw`, and answer with a phrased "Dear ImGui did not render a frame" error if it never
+comes. Out of game that turns an idle timeout into an immediate, honest refusal.
+
+Both `imgui_windows` and `imgui_hover_grid` were verified live against a third-party plugin's window
+(Sonar): the sweep resolved its title bar, tab bar, scroll region and resize border, and an injected click
+on its title bar moved `navWindow` and `wantCaptureKeyboard` to it.
+
 ### Character control (mutating, opt-in)
 
 | Tool | Description | Notable parameters |
@@ -485,9 +529,9 @@ kinds and both timestamps.
 
 ## Safety model
 
-**Read-only by default.** 58 of the 87 tools read state; none writes it. The mutating gate is enforced, and the 29
-tools registered behind it — action casting, targeting and movement, chat, plugin management, addon-window control
-and the IPC endpoint registry — stay invisible until `AllowMutatingTools` is turned on.
+**Read-only by default.** 63 of the 102 tools read state; none writes it. The mutating gate is enforced, and the 39
+tools registered behind it — action casting, targeting and movement, chat, plugin management, addon-window control,
+Dear ImGui input injection and the IPC endpoint registry — stay invisible until `AllowMutatingTools` is turned on.
 
 **Loopback only.** The listener binds `IPAddress.Loopback` (`127.0.0.1`) directly with a `TcpListener`, not
 `HttpListener`. That avoids the HTTP.SYS URL-ACL requirement — no elevation and no `netsh` reservation is needed —
@@ -598,8 +642,8 @@ say the token is missing) and once **with** it.
 TypeScript implementation, pinned at `1.30.1`) rather than hand-written JSON-RPC, so the framing is judged by an
 independent implementation. The official client completes `initialize`, reads back the server's identity, parses
 `tools/list`, round-trips a tool call, receives a tool error as `isError` rather than a transport failure, and
-keeps working afterwards. Its fourth phase validates all 87 **shipped** schemas — `PluginLoadTest` dumps its
-`tools/list` payload when `DALAMUD_MCP_DUMP_TOOLS` is set, and that payload is run through the SDK's declared
+keeps working afterwards. Its fourth phase validates all 102 **shipped** schemas — `PluginLoadTest` dumps every
+page of its `tools/list` payload when `DALAMUD_MCP_DUMP_TOOLS` is set, and that payload is run through the SDK's declared
 `ToolSchema` and then compiled against the JSON Schema 2020-12 meta-schema using the `ajv` bundled inside the SDK.
 
 Two findings are worth recording, since both are cases where a check had to be strengthened before it meant
@@ -608,7 +652,7 @@ anything:
 - The SDK's own `ToolSchema` validation is too lenient to catch this project's defect class: it types
   `inputSchema` as an object with a `"type"` of `"object"` and a `properties` record whose values are only checked
   to be *objects*, never that a property's `type` is one of JSON Schema's legal names. Re-injecting the original
-  `{"type":"array of integer"}` defect into the real 87-tool payload still passed it. The label therefore says
+  `{"type":"array of integer"}` defect into the real 102-tool payload still passed it. The label therefore says
   only what it proves, and the ajv meta-schema pass — added alongside it — rejects the defect with an independent
   message: `type must be JSONType or JSONType[]: array of integer`.
 - `negative.mjs` points the official client at a deliberately non-conforming server and requires it to fail. It
@@ -688,7 +732,7 @@ persisting the setting), and an out-of-range port must be refused **without** ch
 The memory tools are verified against real memory here too. `MemoryProbe` reads the current process via
 `ReadProcessMemory(GetCurrentProcess(), ...)`, and the load test hosts the plugin in its own process, so it can pin
 a known byte pattern and assert the tool returns exactly those bytes back. The safety guard is checked by reading
-address `0x1` and requiring a phrased refusal. Every one of the 87 shipped tool schemas is validated from
+address `0x1` and requiring a phrased refusal. Every one of the 102 shipped tool schemas is validated from
 `tools/list` over the real socket: each `inputSchema` must be a JSON object with an object `properties`, every
 property must carry a `type` that is one of JSON Schema's seven legal names, every `array` must say what its `items`
 are, and every name in `required` must actually be declared. The same section cross-checks schema against

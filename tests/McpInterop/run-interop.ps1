@@ -72,7 +72,7 @@ try {
         & node (Join-Path $here 'negative.mjs')
         $negativeExit = $LASTEXITCODE
 
-        # The REAL 87-tool payload, validated by the official parser and by the ajv that ships
+        # The REAL tool payload, validated by the official parser and by the ajv that ships
         # inside the SDK. PluginLoadTest dumps it when DALAMUD_MCP_DUMP_TOOLS is set.
         $realTools = Join-Path $here 'real-tools.json'
         $dumpPath = Join-Path ([System.IO.Path]::GetTempPath()) "dalamud-mcp-real-tools-$PID.json"
@@ -88,7 +88,7 @@ try {
             if (Test-Path $dumpPath) {
                 Copy-Item $dumpPath $realTools -Force
                 Write-Host ''
-                Write-Host '--- real-tool schema validation: the official SDK + ajv against all 87 tools ---'
+                Write-Host '--- real-tool schema validation: the official SDK + ajv against every shipped tool ---'
                 & node (Join-Path $here 'validate-real-tools.mjs') $realTools
                 $realExit = $LASTEXITCODE
             }

@@ -8,8 +8,8 @@ Dalamud MCP 是一个 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatcor
 目标、FATE、货币、Excel 游戏数据，以及通过
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) 读取的任意经过校验的原始内存。
 
-MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 87 个工具 —— 58 个只读，外加 29 个可变更工具（可选开启），
-能直接作用于游戏：施放技能、选择目标与移动、发送聊天、管理插件、操控 addon 窗口，以及与其他插件注册 IPC 端点。
+MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 102 个工具 —— 63 个只读，外加 39 个可变更工具（可选开启），
+能直接作用于游戏：施放技能、选择目标与移动、发送聊天、管理插件、操控 addon 窗口、注入 Dear ImGui 输入，以及与其他插件注册 IPC 端点。
 后台还有一个事件采集器，把游戏状态变化记入环形缓冲区，Agent 可以轮询变化而不必每回合重读完整状态。
 
 > **验证范围。** 那次唯一的游戏内验证会话当时交付的 33 个只读工具均已针对一个实时登录的客户端完成验证。
@@ -128,10 +128,10 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 闸门在两处强制：可变更工具被从 `tools/list` 过滤掉，即使客户端知道名字，`tools/call` 也会以解释性错误拒绝。
 打开设置还会把标签从 "read-only (recommended)" 换成 "agents may change game state" 警告。
 
-**注意：** 闸门已完整实现并测试，可变更工具都在它之后交付。本文档列出的 29 个工具 —— 技能施放与选择目标、
-自动移动、传送、聊天与斜杠命令、插件管理、addon 窗口控制、屏幕截图与 IPC 端点注册 —— 都能作用于游戏。全部被
-标记为可变更，因此在 `AllowMutatingTools` 打开之前，它们在 `tools/list` 中不可见、`tools/call` 会拒绝；
-其余 58 个工具仍然只读。
+**注意：** 闸门已完整实现并测试，可变更工具都在它之后交付。本文档列出的 39 个工具 —— 技能施放与选择目标、
+自动移动、传送、聊天与斜杠命令、插件管理、addon 窗口控制、Dear ImGui 输入注入与 IPC 端点注册 —— 都能作用于游戏。
+全部被标记为可变更，因此在 `AllowMutatingTools` 打开之前，它们在 `tools/list` 中不可见、`tools/call` 会拒绝；
+其余 63 个工具仍然只读。
 
 ## 连接 Agent
 
@@ -232,7 +232,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-87 个工具：58 个只读，外加 29 个可变更工具（控制、聊天、插件管理、addon 窗口与 IPC 端点注册），在
+102 个工具：63 个只读，外加 39 个可变更工具（控制、聊天、插件管理、addon 窗口、Dear ImGui 输入注入与 IPC 端点注册），在
 `AllowMutatingTools` 打开前隐藏。名称与 `tools/list` 中完全一致。
 
 ### 客户端与会话
@@ -344,6 +344,43 @@ agent 仍报告未激活，所以该普查只是提示而非事实基准，可�
 碰撞节点发送合成的 `buttonPress`+`buttonRelease` 对能关闭窗口；真实鼠标点击到达的是组件注册的监听器而非
 addon 的 vtable，这正是 `registered` 事件模式与监听器级 probe 存在的原因。
 
+### Dear ImGui 输入注入（可变更，需 opt-in）
+
+这组工具把事件送进 Dear ImGui 自己的输入队列 —— 与真实后端调用的是同一批 `AddMousePosEvent` /
+`AddMouseButtonEvent` / `AddKeyEvent` / `AddInputCharacter` —— 从而驱动进程中**任意** Dear ImGui 窗口。这里
+没有任何一处知道别的插件是谁：参数只用坐标、id 和 Dear ImGui 自己暴露的键名，因此它们对 Dalamud 的窗口、
+本插件的窗口、以及所有第三方插件的窗口一视同仁，不需要引用任何插件程序集、窗口名或命令。先用
+`imgui_windows` 找到矩形，再用 `imgui_hover_grid` 找到矩形里的控件，你就不必知道窗口是谁画的。
+
+| 工具 | 描述 | 关键参数 |
+| --- | --- | --- |
+| `imgui_state` | Dear ImGui 此刻对指针与焦点的认知：帧计数、显示尺寸、鼠标位置、各按键按下状态、`WantCaptureMouse` / `WantCaptureKeyboard` / `WantTextInput` 标志，以及当前 hovered / active / nav 的窗口与 id。这是注入类工具的事实基准 —— 在点击前后各读一次就能看到变化。只读。 | 无 |
+| `imgui_windows` | 进程中每个 Dear ImGui 窗口的名称、id、位置、尺寸与 active / hidden / collapsed / focused 标志，坐标系与鼠标类工具接受的一致。用 `contains` 按名称片段过滤。只读。 | `contains`、`onlyActive`、`onlyVisible`、`max`（默认 200） |
+| `imgui_mouse_move` | 移动注入的指针并等待其稳定，然后报告 hovered 到了什么。 | `x`、`y`（必填）、`settleFrames`（默认 2）、`moveCursor`、`restoreCursor` |
+| `imgui_mouse_click` | 在指定坐标注入一次真实的按下与抬起。按下与抬起落在不同的帧上，因此点击不会被 ImGui 的 trickle 队列合并。 | `x`、`y`、`button`（0 左/1 右/2 中）、`double`、`settleFrames`（默认 3）、`moveCursor`、`restoreCursor` |
+| `imgui_mouse_scroll` | 注入滚轮事件，可先移动到目标控件。增量以 ImGui 刻度计。 | `x`、`y`、`deltaY`（默认 -3）、`deltaX`、`settleFrames` |
+| `imgui_key_press` | 一次完整按键，可在整个组合键期间按住 Ctrl / Shift / Alt，键名用 Dear ImGui 的命名（`Enter`、`Escape`、`A`、`F1`、`LeftArrow`、`LeftCtrl` …）。 | `key`（必填）、`ctrl`、`shift`、`alt` |
+| `imgui_key` | 不加配对的单独按下或抬起，用于在多次调用之间按住修饰键。 | `key`、`down`（均必填） |
+| `imgui_text` | 走字符输入通道输入一个字符串，因此不依赖 IME 的文本（含中日韩）能进入任何获得键盘焦点的 ImGui 输入框。请在聚焦该输入框之后再发送。 | `text`（必填）、`charsPerFrame`（1-16，默认 16） |
+| `imgui_hover_grid` | 通用的控件发现原语。让指针按 `cols x rows` 的网格扫过一个矩形，每个位置停留一帧、在下一帧采样，返回每格是否落在窗口内以及 hovered 的 id。一次调用即可重建任意窗口的命中布局；`rows=1` 就是一条水平扫描线。 | `x0`、`y0`、`x1`、`y1`（必填）、`cols`（默认 8）、`rows`（默认 8）、`settleFrames` |
+| `imgui_wait` | 空转若干帧，让弹窗或布局变化稳定下来。只读。 | `frames`（1-600，默认 30） |
+
+`imgui_state`、`imgui_windows` 与 `imgui_wait` 只读；其余七个可变更，在 `AllowMutatingTools` 打开前隐藏。
+
+机制上，每个请求会被展开成一系列单帧步骤，由 `UiBuilder.Draw` 钩子每帧恰好执行一步 —— 这正是点击能成为真正
+的"先按后抬"、以及位置能在被读取之前先稳定下来的原因。鼠标注入还会在任务期间抬高 `io.WantSetMousePos`：
+当该标志为 false 时，Dalamud 的 Win32 后端每帧都会把真实的操作系统光标位置重新入队，从而覆盖注入的坐标。
+该标志同时也是让后端把物理光标移到注入点的原因，于是两者一致而非互相干扰；每个任务在最后一步被消费后会还
+原该标志、`AppAcceptingEvents` 状态与原始光标位置，而 `moveCursor` / `restoreCursor` 可以完全关闭物理光标移动，
+用于纯合成输入。
+
+注入类工具在真正提交任务前还会先确认帧循环是活的：它们最多等待两秒以看到第一次 `UiBuilder.Draw`，
+若始终没有出现，就以一句措辞明确的"Dear ImGui 未渲染任何帧"错误作答。在游戏外，这把一次空等超时变成
+了立刻、诚实的拒绝。
+
+`imgui_windows` 与 `imgui_hover_grid` 均已在真实游戏中对一个第三方插件的窗口（Sonar）实测：该扫描解析出了它的
+标题栏、标签栏、滚动区与调整边框，而一次注入到标题栏的点击把 `navWindow` 与 `wantCaptureKeyboard` 转移到了它身上。
+
 ### 角色控制（可变更，需 opt-in）
 
 | 工具 | 描述 | 关键参数 |
@@ -454,8 +491,8 @@ addon 的 vtable，这正是 `registered` 事件模式与监听器级 probe 存�
 
 ## 安全模型
 
-**默认只读。** 87 个工具中的 58 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 29 个工具
-—— 技能施放、选择目标与移动、聊天、插件管理、addon 窗口控制与 IPC 端点注册 —— 在 `AllowMutatingTools`
+**默认只读。** 102 个工具中的 63 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 39 个工具
+—— 技能施放、选择目标与移动、聊天、插件管理、addon 窗口控制、Dear ImGui 输入注入与 IPC 端点注册 —— 在 `AllowMutatingTools`
 打开前不可见。
 
 **仅回环。** 监听器直接以 `TcpListener` 绑定 `IPAddress.Loopback`（`127.0.0.1`），而非 `HttpListener`。这
@@ -557,14 +594,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 `tests\McpInterop` 用**官方** MCP SDK（`@modelcontextprotocol/sdk`，TypeScript 实现，锁定 `1.30.1`）而非
 手写 JSON-RPC 驱动真实服务器，让组帧由独立实现裁决。官方客户端完成 `initialize`、读回服务器身份、解析
 `tools/list`、往返一次工具调用、把工具错误作为 `isError` 接收而非传输失败，并且之后继续工作。它的第四阶段
-校验全部 87 个**交付** schema：`PluginLoadTest` 在设置了 `DALAMUD_MCP_DUMP_TOOLS` 时导出 `tools/list` 载荷，
+校验全部 102 个**交付** schema：`PluginLoadTest` 在设置了 `DALAMUD_MCP_DUMP_TOOLS` 时导出 `tools/list` 的每一页载荷，
 该载荷经过 SDK 声明的 `ToolSchema`，再用 SDK 内置的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译。
 
 有两处发现值得记录，因为二者都是"检查在被加强之前并不能说明什么"的例子：
 
 - SDK 自身的 `ToolSchema` 校验宽不到本项目这类缺陷：它把 `inputSchema` 定为带 `"object"` 型 `type` 与
   `properties` 记录的对象，其值只被检查为*对象*，从不检查属性的 `type` 是否为 JSON Schema 的合法名。把原始
-  `{"type":"array of integer"}` 缺陷重新注入真实的 87 工具载荷，它照样通过。因此该标签只陈述它证明的内容，
+  `{"type":"array of integer"}` 缺陷重新注入真实的 102 工具载荷，它照样通过。因此该标签只陈述它证明的内容，
   而与之并列加入的 ajv 元 schema 检查以一条独立消息拒绝该缺陷：
   `type must be JSONType or JSONType[]: array of integer`。
 - `negative.mjs` 把官方客户端指向一个刻意不符规的服务器并要求它失败。它曾因错误原因通过：宿主绑到了
@@ -628,7 +665,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 
 内存工具在这里也是对**真实内存**验证的。`MemoryProbe` 通过 `ReadProcessMemory(GetCurrentProcess(), ...)`
 读取当前进程，而加载测试在自己的进程内承载插件，所以它可以钉入一个已知字节模式并断言工具原样返回这些字节。
-安全防护通过读取地址 `0x1` 并要求得到一句有措辞的拒绝来检查。全部 87 个交付工具的 schema 都通过真实 socket
+安全防护通过读取地址 `0x1` 并要求得到一句有措辞的拒绝来检查。全部 102 个交付工具的 schema 都通过真实 socket
 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型 `properties` 的 JSON 对象，每个属性必须携带
 JSON Schema 七个合法名之一的 `type`，每个 `array` 必须说明其 `items`，`required` 里的每个名字都必须真的被
 声明。同一段落还把 schema 与行为交叉核对：每个处理器自己的"缺少必需参数：X"消息在扫描期间被捕获，并与

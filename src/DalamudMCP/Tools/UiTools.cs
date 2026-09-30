@@ -9,6 +9,7 @@ using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using InteropGenerator.Runtime;
 
 namespace DalamudMCP.Tools;
 
@@ -23,8 +24,9 @@ namespace DalamudMCP.Tools;
 /// shortcut: show or hide a system window, or ask which ones are open. The click surface
 /// (click_addon_element) is likewise bounded to dispatching one Atk UI event at a synthetic
 /// position inside a window the agent has already enumerated — the moral equivalent of moving
-/// the mouse and clicking, not a macro engine: nothing here types text, fires addon callbacks
-/// with crafted AtkValue payloads, or touches combat state.</para>
+/// the mouse and clicking, not a macro engine: nothing here types text or touches combat
+/// state. Crafted AtkValue callback payloads live in <c>CallbackTools</c>, a separate set
+/// with its own justification.</para>
 ///
 /// <para>The list/click mechanics go one layer below the agent layer, to the game's own UI
 /// tree: RaptureAtkUnitManager resolves a loaded addon (AtkUnitBase), its RootNode tree is
@@ -529,8 +531,8 @@ internal static class UiTools
         {
             ["addon"] = unit->NameString,
             ["addonId"] = (int)unit->Id,
-            ["x"] = (int)unit->GetX(),
-            ["y"] = (int)unit->GetY(),
+            ["x"] = (int)unit->X,
+            ["y"] = (int)unit->Y,
             ["scale"] = (float)unit->Scale,
             ["truncated"] = truncated,
             ["elements"] = elements,
@@ -619,7 +621,7 @@ internal static class UiTools
         if (node is null)
             return Json.ToolError($"no node with id {nodeId} was found in this addon; list it " +
                                   "with list_addon_elements");
-        if (!node->IsVisible())
+        if (!NodeVisible(node))
             return Json.ToolError($"node {nodeId} is not currently visible");
 
         // ClickLib's proven dispatch shape (ClickBase.SendClick): ALWAYS dispatch through
@@ -642,13 +644,22 @@ internal static class UiTools
         }
         else
         {
-            eventParam = node->GetEventParam(eventType.Value);
-
-            // Read the node's registered event param if the generic probe returned 0 —
-            // close buttons are registered with 0xFFFFFFFF which GetEventParam may not surface.
+            // Pure-managed replacement for node->GetEventParam(eventType): walk the node's
+            // registered events and take the param of the first match for this event type,
+            // falling back to the first non-zero param (close buttons register 0xFFFFFFFF,
+            // which a type-specific probe may not surface).
+            eventParam = 0;
             for (var e = node->AtkEventManager.Event; e is not null; e = e->NextEvent)
             {
-                if (eventParam == 0 && e->Param != 0)
+                if (e->Param == 0)
+                    continue;
+                if (e->State.EventType == eventType.Value)
+                {
+                    eventParam = e->Param;
+                    break;
+                }
+
+                if (eventParam == 0)
                     eventParam = e->Param;
             }
             if (eventParam == 0)
@@ -1000,7 +1011,7 @@ internal static class UiTools
     /// Resolves an AtkUnitBase either by allowlist name (through the agent layer's addon
     /// names) or by raw addon id, via RaptureAtkUnitManager.
     /// </summary>
-    private static unsafe AtkUnitBase* ResolveAddon(string? addonName, JToken? addonIdArg)
+    internal static unsafe AtkUnitBase* ResolveAddon(string? addonName, JToken? addonIdArg)
     {
         var manager = SafeRaptureAtkUnitManager();
         if (manager is null)
@@ -1159,7 +1170,7 @@ internal static class UiTools
             ["y"] = (int)node->ScreenY,
             ["width"] = (int)node->Width,
             ["height"] = (int)node->Height,
-            ["visible"] = node->IsVisible(),
+            ["visible"] = NodeVisible(node),
             ["enabled"] = (node->NodeFlags & NodeFlags.Enabled) != 0,
             ["clickable"] = clickable,
         };
@@ -1179,75 +1190,133 @@ internal static class UiTools
     private static unsafe AtkComponentNode* ComponentNodeOf(AtkResNode* node) =>
         IsComponentType(node) ? (AtkComponentNode*)node : null;
 
-    /// <summary>Label text for text/button/list nodes; null when the node carries no text.</summary>
+    /// <summary>
+    /// Pure field read of NodeFlags.Visible. Replaces the native <c>AtkResNode.IsVisible()</c>
+    /// member function: that helper is a reverse P/Invoke into the client and dereferences
+    /// <c>this</c>, so a stale pointer raises a native access violation that
+    /// <c>catch (Exception)</c> cannot intercept — it terminates ffxiv_dx11.exe.
+    /// </summary>
+    private static unsafe bool NodeVisible(AtkResNode* node) =>
+        node is not null && (node->NodeFlags & NodeFlags.Visible) != 0;
+
+    /// <summary>
+    /// Pure field read of the component's kind. Replaces the native
+    /// <c>AtkComponentBase.GetComponentType()</c> and every <c>GetAsAtkComponentX()</c> probe:
+    /// all of those are reverse P/Invokes that dereference the pointer handed to them.
+    /// The kind lives in the ULD component info, which is only populated when the manager's
+    /// BaseType is Component.
+    /// </summary>
+    private static unsafe ComponentType? ComponentKindOf(AtkComponentNode* compNode)
+    {
+        if (compNode is null)
+            return null;
+        var comp = compNode->Component;
+        if (comp is null)
+            return null;
+        if (comp->UldManager.BaseType != AtkUldManagerBaseType.Component)
+            return null;
+
+        var data = (AtkUldComponentInfo*)comp->UldManager.ComponentData;
+        return data is null ? null : data->ComponentType;
+    }
+
+    /// <summary>Reads a game-side Utf8String without any native call.</summary>
+    private static unsafe string? ReadUtf8(Utf8String* text)
+    {
+        if (text is null)
+            return null;
+        var s = text->ToString();
+        return string.IsNullOrWhiteSpace(s) ? null : s;
+    }
+
+    private static string? ReadCString(CStringPointer pointer) =>
+        pointer.HasValue ? pointer.ToString() : null;
+
+    /// <summary>
+    /// Whether the node has a MouseClick handler registered, read straight off the
+    /// AtkEventManager chain. Replaces the native <c>AtkResNode.IsEventRegistered</c>.
+    /// </summary>
+    private static unsafe bool NodeHasMouseClickEvent(AtkResNode* node)
+    {
+        for (var e = node->AtkEventManager.Event; e is not null; e = e->NextEvent)
+        {
+            if (e->State.EventType == AtkEventType.MouseClick)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Label text for text/button/list nodes; null when the node carries no text. Every step
+    /// is a plain field read (Utf8String / CStringPointer / UldManager component kind) — no
+    /// reverse P/Invoke, so a stale or unexpected node can never kill the client process.
+    /// </summary>
     private static unsafe string? NodeLabel(AtkResNode* node)
     {
         try
         {
+            if (node is null)
+                return null;
+
             if (node->Type == NodeType.Text)
+                return ReadUtf8(&((AtkTextNode*)node)->NodeText);
+
+            if (!IsComponentType(node))
+                return null;
+
+            var compNode = ComponentNodeOf(node);
+            if (compNode is null)
+                return null;
+
+            var kind = ComponentKindOf(compNode);
+            if (kind is null)
+                return null;
+
+            // Button: its own text node.
+            if (kind == ComponentType.Button)
             {
-                var text = node->GetAsAtkTextNode();
-                var cp = text->GetText();
-                return cp.HasValue ? cp.ToString() : null;
+                var textNode = ((AtkComponentButton*)compNode->Component)->ButtonTextNode;
+                var text = ReadUtf8(textNode is null ? null : &textNode->NodeText);
+                if (text is not null)
+                    return text;
             }
 
-            if (IsComponentType(node))
+            // List: first item labels, so the agent can see what's selectable.
+            if (kind == ComponentType.List)
             {
-                var compNode = ComponentNodeOf(node);
-                var comp = compNode->Component;
-                if (comp is null)
+                var list = (AtkComponentList*)compNode->Component;
+                if (list is null || list->ItemLabels is null)
                     return null;
 
-                // Button: its own text node.
-                var button = compNode->GetAsAtkComponentButton();
-                if (button is not null && button->ButtonTextNode is not null)
+                var items = new JArray();
+                var count = Math.Min(list->ListLength, 8);
+                for (var i = 0; i < count; i++)
                 {
-                    var cp = button->ButtonTextNode->GetText();
-                    var s = cp.HasValue ? cp.ToString() : null;
-                    if (!string.IsNullOrWhiteSpace(s))
-                        return s;
+                    var label = ReadCString(list->ItemLabels[i]);
+                    if (label is not null)
+                        items.Add(label);
                 }
 
-                // List: first item labels, so the agent can see what's selectable.
-                var list = compNode->GetAsAtkComponentList();
-                if (list is not null)
-                {
-                    var items = new JArray();
-                    var count = Math.Min(list->GetItemCount(), 8);
-                    for (var i = 0; i < count; i++)
-                    {
-                        var cp = list->GetItemLabel(i);
-                        if (cp.HasValue)
-                            items.Add(cp.ToString());
-                    }
-
-                    return items.Count > 0 ? items.ToString(Newtonsoft.Json.Formatting.None) : null;
-                }
-
-                // Generic component: try the component's own text nodes by id 2.
-                var renderer = compNode->GetAsAtkComponentListItemRenderer();
-                if (renderer is not null)
-                {
-                    var tn = renderer->GetTextNodeById(2);
-                    var cp = tn is not null ? tn->GetText() : default;
-                    return cp is { HasValue: true } ? cp.ToString() : null;
-                }
+                return items.Count > 0 ? items.ToString(Newtonsoft.Json.Formatting.None) : null;
             }
+
+            return null;
         }
         catch (Exception)
         {
             return null;
         }
-
-        return null;
     }
 
     /// <summary>Whether a node can plausibly receive click events.</summary>
     private static unsafe bool NodeClickable(AtkResNode* node)
     {
+        if (node is null)
+            return false;
+
         if (node->Type == NodeType.Collision)
-            return (node->NodeFlags & NodeFlags.RespondToMouse) != 0
-                   || node->IsEventRegistered(AtkEventType.MouseClick);
+            return (node->NodeFlags & NodeFlags.RespondToMouse) != 0 || NodeHasMouseClickEvent(node);
 
         if (IsComponentType(node))
         {
@@ -1255,14 +1324,23 @@ internal static class UiTools
             if (compNode is null || compNode->Component is null)
                 return false;
 
-            var kind = compNode->GetAsAtkComponentButton() is not null
-                       || compNode->GetAsAtkComponentCheckBox() is not null
-                       || compNode->GetAsAtkComponentList() is not null
-                       || compNode->GetAsAtkComponentTreeList() is not null
-                       || compNode->GetAsAtkComponentIconText() is not null
-                       || compNode->GetAsAtkComponentSlider() is not null
-                       || compNode->GetAsAtkComponentTextInput() is not null;
-            return kind || node->IsEventRegistered(AtkEventType.MouseClick);
+            var clickableKind = ComponentKindOf(compNode) is ComponentType.Button
+                or ComponentType.CheckBox
+                or ComponentType.RadioButton
+                or ComponentType.List
+                or ComponentType.TreeList
+                or ComponentType.DropDownList
+                or ComponentType.IconText
+                or ComponentType.Slider
+                or ComponentType.TextInput
+                or ComponentType.NumericInput
+                or ComponentType.Tab
+                or ComponentType.HoldButton
+                or ComponentType.Icon
+                or ComponentType.DragDrop
+                or ComponentType.TextNineGrid
+                or ComponentType.ListItemRenderer;
+            return clickableKind || NodeHasMouseClickEvent(node);
         }
 
         return false;
@@ -1335,7 +1413,7 @@ internal static class UiTools
                 if (node->NodeId == nodeId)
                 {
                     var score = 0;
-                    if (node->IsVisible()) score += 2;
+                    if (NodeVisible(node)) score += 2;
                     if (NodeClickable(node)) score += 1;
                     if (score > bestLocal)
                     {
@@ -1362,12 +1440,16 @@ internal static class UiTools
         {
             while (node is not null)
             {
-                if (IsComponentType(node) && node->IsVisible())
+                if (IsComponentType(node) && NodeVisible(node))
                 {
                     var compNode = ComponentNodeOf(node);
-                    var list = compNode->Component is null ? null : compNode->GetAsAtkComponentList();
-                    if (list is not null && index < list->GetItemCount())
-                        return list;
+                    if (compNode is not null && compNode->Component is not null &&
+                        ComponentKindOf(compNode) == ComponentType.List)
+                    {
+                        var list = (AtkComponentList*)compNode->Component;
+                        if (index < list->ListLength)
+                            return list;
+                    }
                 }
 
                 var inChild = FindListNode(node->ChildNode, index);

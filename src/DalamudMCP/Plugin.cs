@@ -136,6 +136,8 @@ public sealed class Plugin : IDalamudPlugin
         MemoryTools.Register(registry, services);
         StructTools.Register(registry, services);
         UiTools.Register(registry, services);
+        CallbackTools.Register(registry, services);
+        ImGuiInputTools.Register(registry, services);
         InventoryTools.Register(registry, services);
         BuddyTools.Register(registry, services);
         ControlTools.Register(registry, services);
@@ -358,6 +360,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         commandManager.RemoveHandler(CommandName);
 
+        ImGuiInputTools.Unregister();
         pluginInterface.UiBuilder.Draw -= windowSystem.Draw;
         pluginInterface.UiBuilder.OpenConfigUi -= OpenConfig;
 

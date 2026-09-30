@@ -43,6 +43,13 @@ namespace PluginLoadTest;
 /// </summary>
 internal static class Program
 {
+    /// <summary>
+    /// The number of tools the plugin registers. Update this whenever a tool is added or
+    /// removed; the count assertions below exist to catch an accidental drop during
+    /// registration refactors, not to pin the feature set.
+    /// </summary>
+    private const int ExpectedTools = 102;
+
     private static int checks;
     private static int failures;
 
@@ -157,7 +164,7 @@ internal static class Program
         // Turned on BEFORE the plugin is constructed, so the live protocol checks below also
         // prove that Plugin.StartServer forwards this setting to the server it builds.
         Set(config, "LogRequests", true);
-        // Mutating tools on, so tools/list exposes the full 87-tool set over the real socket and
+        // Mutating tools on, so tools/list exposes the full tool set over the real socket and
         // the sweep can exercise open_addon/close_addon/click_addon_element's argument validation.
         Set(config, "AllowMutatingTools", true);
 
@@ -337,7 +344,7 @@ internal static class Program
             ? new List<string>()
             : tools.Cast<object>().Select(t => Prop(t, "Name") as string ?? string.Empty).ToList();
 
-        Check("all 87 tools were registered", toolNames.Count == 87, $"found {toolNames.Count}");
+        Check($"all {ExpectedTools} tools were registered", toolNames.Count == ExpectedTools, $"found {toolNames.Count}");
         Check("tool names are unique", toolNames.Distinct(StringComparer.Ordinal).Count() == toolNames.Count);
         Check("registry exposes get_conditions", toolNames.Contains("get_conditions"));
         Check("registry exposes read_memory", toolNames.Contains("read_memory"));
@@ -380,9 +387,11 @@ internal static class Program
             Check("initialize returned a session id", !string.IsNullOrEmpty(sessionId), sessionId ?? "(none)");
             Check("initialize reports serverInfo.name = dalamud-mcp", initBody.Contains("dalamud-mcp", StringComparison.Ordinal));
 
-            var listText = await CallAsync(http, baseUrl, sessionId, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}").ConfigureAwait(false);
+            // Page through tools/list: the server caps a page at 100 tools, so a single un-paged
+            // call silently hides everything past the first hundred.
+            var listText = await ListAllToolsAsync(http, baseUrl, sessionId).ConfigureAwait(false);
             var listed = CountToolEntries(listText);
-            Check("tools/list returns 87 tools over the real socket", listed == 87, $"found {listed}");
+            Check($"tools/list returns {ExpectedTools} tools over the real socket", listed == ExpectedTools, $"found {listed}");
 
             var callText = await CallAsync(
                 http, baseUrl, sessionId,
@@ -610,7 +619,7 @@ internal static class Program
 
             // ------------------------------------------------------ tool sweep
             // Every registered tool is CALLED here, with no arguments. This is the difference
-            // between "87 tools registered" and "87 tools do not take the client down": a handler
+            // between "every tool registered" and "every tool does not take the client down": a handler
             // that dereferences a pointer without checking it is a corrupted-state exception in
             // .NET, which kills the process uncatchably. Out of game that failure mode is a red
             // test; in game it is a crashed client. An agent can also send a tool call with no
@@ -748,15 +757,18 @@ internal static class Program
 
             // -------------------------------------------------------- tool schemas
             // The schema is the ONLY thing an agent sees before calling a tool: it decides which
-            // arguments to fill in and which to leave out. Nothing had ever checked that the 31
+            // arguments to fill in and which to leave out. Nothing had ever checked that the
             // shipped schemas are well-formed, or that a parameter the schema calls OPTIONAL is
             // not actually demanded by the handler. This section does both, from tools/list over
             // the real socket, and cross-checks against the parameters the sweep above observed
             // the handlers actually asking for.
-            var schemaText = await CallAsync(http, baseUrl, sessionId, "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/list\",\"params\":{}}").ConfigureAwait(false);
+            //
+            // Paged, for the same reason as above: an un-paged call would only validate the first
+            // hundred schemas and report the rest as fine by omission.
+            var schemaText = await ListAllToolsAsync(http, baseUrl, sessionId).ConfigureAwait(false);
             var (schemaProblems, schemasChecked) = ValidateToolSchemas(schemaText);
 
-            // Hand the REAL 87-tool payload to the interop suite, which validates it with the
+            // Hand the REAL tool payload to the interop suite, which validates it with the
             // official @modelcontextprotocol/sdk parser (tests\McpInterop). The checks below use
             // this project's own reading of JSON Schema; the SDK is somebody else's reading of
             // the same spec, so a schema that only satisfies my parser is caught there.
@@ -940,7 +952,7 @@ internal static class Program
             && statusLine.Contains(port.ToString(), StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
         Check("the status subcommand reports the tool count",
-            statusLine is not null && statusLine.Contains("87 tools", StringComparison.Ordinal),
+            statusLine is not null && statusLine.Contains($"{ExpectedTools} tools", StringComparison.Ordinal),
             FirstLine(statusLine ?? "(nothing printed)"));
 
         // 'stop' followed by 'start' must take the port down and bring it back - the two paths a
@@ -1564,6 +1576,40 @@ internal static class Program
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Walks EVERY tools/list page and returns one merged JSON-RPC response whose result.tools
+    /// holds the union. The server paginates at <c>pageSize = 100</c> and reports
+    /// <c>nextCursor</c> (see McpServer's tools/list case), so a single un-paged call only ever
+    /// shows the first 100 tools - which silently hid the last two registrations from this suite.
+    /// </summary>
+    private static async Task<string> ListAllToolsAsync(HttpClient http, string baseUrl, string? session)
+    {
+        var tools = new List<string>();
+        string? cursor = null;
+
+        // Bounded so a server that returned a non-advancing cursor could not spin forever.
+        for (var page = 0; page < 50; page++)
+        {
+            var body = cursor is null
+                ? "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}"
+                : $"{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{{\"cursor\":\"{cursor}\"}}}}";
+            var text = await CallAsync(http, baseUrl, session, body).ConfigureAwait(false);
+
+            using var document = JsonDocument.Parse(text);
+            if (!document.RootElement.TryGetProperty("result", out var result)) return text;
+            if (result.TryGetProperty("tools", out var entries) && entries.ValueKind == JsonValueKind.Array)
+                foreach (var tool in entries.EnumerateArray()) tools.Add(tool.GetRawText());
+
+            cursor = result.TryGetProperty("nextCursor", out var next) ? next.GetString() : null;
+            if (string.IsNullOrEmpty(cursor)) break;
+        }
+
+        var merged = new StringBuilder("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[");
+        merged.Append(string.Join(",", tools));
+        merged.Append("]}}");
+        return merged.ToString();
     }
 
     private static int CountToolEntries(string json)

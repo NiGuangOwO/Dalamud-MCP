@@ -1,4 +1,4 @@
-// Validates the REAL 87-tool tools/list payload with the OFFICIAL @modelcontextprotocol/sdk
+// Validates the REAL 102-tool tools/list payload with the OFFICIAL @modelcontextprotocol/sdk
 // parser.
 //
 // Why this exists alongside tests\PluginLoadTest's own schema checks: that suite validates the
@@ -44,7 +44,7 @@ check("the dumped payload is a JSON-RPC response", response?.jsonrpc === "2.0", 
 check("the dumped payload carries a result, not an error", response?.error === undefined, firstLine(JSON.stringify(response?.error)));
 
 // THE assertion: the official SDK's own schema for tools/list must accept the payload. If any
-// of the 87 tools has a malformed name, description, or inputSchema, this parse fails and the
+// of the 102 tools has a malformed name, description, or inputSchema, this parse fails and the
 // issues list names the exact path.
 //
 // NOTE ON SCOPE, measured rather than assumed: the SDK's ToolSchema checks that inputSchema is
@@ -56,7 +56,7 @@ check("the dumped payload carries a result, not an error", response?.error === u
 // what actually catches an illegal type name.
 const parsed = ListToolsResultSchema.safeParse(response?.result);
 check(
-  "the official SDK accepts all 87 shipped tool definitions as tools/list output",
+  "the official SDK accepts all 102 shipped tool definitions as tools/list output",
   parsed.success,
   parsed.success ? "" : firstLine(JSON.stringify(parsed.error?.issues ?? parsed.error)),
 );
