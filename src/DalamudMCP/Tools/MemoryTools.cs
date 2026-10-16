@@ -86,7 +86,7 @@ internal static class MemoryTools
             Json.SchemaWithEnum(
                 "section", new[] { "text", "data", "rdata", "module" }, "Which section to scan (default text)", false,
                 ("signature", "string", "Byte pattern with ?? wildcards, e.g. \"48 8B 05 ?? ?? ?? ??\"", true),
-                ("maxResults", "integer", "Maximum matches to return (default 1, use 0 for all)", false)),
+                ("maxResults", "integer", "Maximum matches to return (default 1, 0 means up to 4096; maximum 4096). Single text scans retain SDK E8/E9 resolution; other scans return raw match addresses.", false)),
             args => ScanSignature(svc, args));
 
         registry.Add(
@@ -302,68 +302,38 @@ internal static class MemoryTools
 
         var section = (args["section"]?.Value<string>() ?? "text").Trim().ToLowerInvariant();
         var maxResults = args["maxResults"]?.Value<int?>() ?? 1;
-        if (maxResults < 0) maxResults = 0;
+        if (maxResults < 0 || maxResults > 4096)
+            throw new ToolException("maxResults must be between 0 and 4096");
+        var limit = maxResults == 0 ? 4096 : maxResults;
 
         var scanner = svc.SigScanner;
         var matches = new List<IntPtr>();
+        var resolvedText = section == "text" && maxResults == 1;
+        var truncated = false;
+        var moduleBase = scanner.Module.BaseAddress.ToInt64();
+        var searchBase = scanner.SearchBase.ToInt64();
 
         try
         {
-            switch (section)
+            if (resolvedText)
             {
-                case "text":
-                    if (maxResults == 1)
-                    {
-                        if (scanner.TryScanText(signature, out var one)) matches.Add(one);
-                    }
-                    else
-                    {
-                        var all = scanner.ScanAllText(signature);
-                        matches.AddRange(maxResults == 0 ? all : all.Take(maxResults));
-                    }
-
-                    break;
-
-                case "data":
-                    if (scanner.TryScanData(signature, out var data)) matches.Add(data);
-                    break;
-
-                case "module":
-                    if (scanner.TryScanModule(signature, out var inModule)) matches.Add(inModule);
-                    break;
-
-                case "rdata":
-                    // There is no rdata-specific entry point; scan the module and keep only
-                    // matches that land inside the .rdata section's range.
-                    var rdataBase = scanner.RDataSectionBase.ToInt64();
-                    var rdataEnd = rdataBase + scanner.RDataSectionSize;
-
-                    if (maxResults == 1)
-                    {
-                        // A single-match scan may well land in .text, so scan everything and
-                        // filter; correctness beats speed for an ad-hoc lookup.
-                        foreach (var candidate in scanner.ScanAllText(signature))
-                        {
-                            var value = candidate.ToInt64();
-                            if (value >= rdataBase && value < rdataEnd) matches.Add(candidate);
-                        }
-                    }
-                    else
-                    {
-                        foreach (var candidate in scanner.ScanAllText(signature))
-                        {
-                            var value = candidate.ToInt64();
-                            if (value >= rdataBase && value < rdataEnd) matches.Add(candidate);
-                        }
-
-                        if (maxResults > 0 && matches.Count > maxResults)
-                            matches.RemoveRange(maxResults, matches.Count - maxResults);
-                    }
-
-                    break;
-
-                default:
-                    throw new ToolException("section must be one of: text, data, rdata, module");
+                // Preserve the SDK's existing relative CALL/JMP resolution for single text scans.
+                if (scanner.TryScanText(signature, out var one)) matches.Add(one);
+            }
+            else
+            {
+                var (start, size) = section switch
+                {
+                    "text" => (scanner.TextSectionBase, scanner.TextSectionSize),
+                    "data" => (scanner.DataSectionBase, scanner.DataSectionSize),
+                    "rdata" => (scanner.RDataSectionBase, scanner.RDataSectionSize),
+                    "module" => (scanner.SearchBase, scanner.Module.ModuleMemorySize),
+                    _ => throw new ToolException("section must be one of: text, data, rdata, module"),
+                };
+                var raw = ScanRangeBounded(start, size, signature, limit + 1);
+                truncated = raw.Count > limit;
+                foreach (var found in raw.Take(limit))
+                    matches.Add(new IntPtr(checked(moduleBase + found.ToInt64() - searchBase)));
             }
         }
         catch (ToolException)
@@ -375,15 +345,18 @@ internal static class MemoryTools
             throw new ToolException($"signature scan failed: {ex.GetType().Name}: {ex.Message}");
         }
 
-        var baseAddress = (ulong)svc.SigScanner.SearchBase.ToInt64();
         var array = new JArray();
         foreach (var match in matches)
         {
-            var value = (ulong)match.ToInt64();
+            var value = match.ToInt64();
+            var offset = value - moduleBase;
+            var inModule = offset >= 0 && offset < scanner.Module.ModuleMemorySize;
             array.Add(new JObject
             {
-                ["address"] = Hex(value),
-                ["offsetFromSearchBase"] = value >= baseAddress ? value - baseAddress : 0,
+                ["address"] = Hex((ulong)value),
+                ["searchAddress"] = inModule ? Hex((ulong)(searchBase + offset)) : null,
+                ["offsetFromModuleBase"] = inModule ? new JValue(offset) : JValue.CreateNull(),
+                ["offsetFromSearchBase"] = inModule ? new JValue(offset) : JValue.CreateNull(),
             });
         }
 
@@ -392,8 +365,28 @@ internal static class MemoryTools
             ["signature"] = signature,
             ["section"] = section,
             ["count"] = matches.Count,
+            ["limit"] = limit,
+            ["addressKind"] = resolvedText ? "sdkResolvedText" : "rawMatch",
+            ["truncated"] = resolvedText ? JValue.CreateNull() : new JValue(truncated),
             ["matches"] = array,
         };
+    }
+
+    private static List<IntPtr> ScanRangeBounded(IntPtr start, int size, string signature, int limit)
+    {
+        var matches = new List<IntPtr>();
+        var cursor = start.ToInt64();
+        var end = checked(cursor + size);
+        while (cursor < end && matches.Count < limit &&
+               Dalamud.Game.SigScanner.TryScan(new IntPtr(cursor), checked((int)(end - cursor)), signature, out var found))
+        {
+            var address = found.ToInt64();
+            if (address < cursor || address >= end)
+                throw new ToolException("signature scanner returned an address outside the selected range");
+            matches.Add(found);
+            cursor = checked(address + 1);
+        }
+        return matches;
     }
 
     private static object ReadObjectMemory(GameServices svc, JObject args)
