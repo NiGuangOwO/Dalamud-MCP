@@ -54,7 +54,8 @@ internal static class InventoryTools
                 items.Add(new JObject
                 {
                     ["itemId"] = slot.ItemId,
-                    ["name"] = ItemName(svc, slot.ItemId),
+                    ["baseItemId"] = slot.BaseItemId,
+                    ["name"] = ItemName(svc, slot.BaseItemId),
                     ["quantity"] = slot.Quantity,
                     ["isHq"] = slot.IsHq,
                     ["container"] = container.ToString(),
@@ -76,15 +77,21 @@ internal static class InventoryTools
         foreach (var slot in svc.GameInventory.GetInventoryItems(GameInventoryType.EquippedItems))
         {
             if (slot.IsEmpty || slot.ItemId == 0) continue;
+            var materiaCount = 0;
+            foreach (var materia in slot.Materia) if (materia != 0) materiaCount++;
             equipment.Add(new JObject
             {
                 ["itemId"] = slot.ItemId,
-                ["name"] = ItemName(svc, slot.ItemId),
+                ["baseItemId"] = slot.BaseItemId,
+                ["name"] = ItemName(svc, slot.BaseItemId),
+                ["levelItem"] = svc.Sheet<Item>().GetRowOrDefault(slot.BaseItemId)?.LevelItem.RowId,
                 ["quantity"] = slot.Quantity,
                 ["isHq"] = slot.IsHq,
                 ["slot"] = slot.InventorySlot.ToString(),
                 ["condition"] = slot.Condition,
                 ["spiritbondOrCollectability"] = slot.SpiritbondOrCollectability,
+                ["glamourId"] = slot.GlamourId,
+                ["materiaCount"] = materiaCount,
             });
         }
 
