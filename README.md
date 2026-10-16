@@ -9,7 +9,7 @@ the client itself uses: the object table, the local player, party and alliance, 
 game data, and arbitrary validated raw memory through
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 
-An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 107 tools — 66 read-only, plus 41 mutating tools
+An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 107 tools — 65 read-only, plus 42 mutating tools
 (opt-in) that can act on the game: cast actions, target and move, send chat, manage plugins, drive addon windows,
 inject Dear ImGui input, and register IPC endpoints with other plugins. A background event collector also records game-state changes into
 a ring buffer that an agent can poll instead of re-reading full state.
@@ -149,7 +149,7 @@ All of them are flagged mutating, so they stay invisible in `tools/list` and rej
 
 ## Connect an agent
 
-See [addon probes and the verified developer loader](docs/addon-probes-and-dev-loader.md) for frame-aligned node sampling, conditional input, component-scoped node lookup, development-plugin loading, and the callback-probe address fix. The catalog now has 107 tools (66 read-only, 41 mutating); follow `nextCursor` when listing more than 100 tools.
+See [addon probes and the verified developer loader](docs/addon-probes-and-dev-loader.md) for frame-aligned node sampling, conditional input, component-scoped node lookup, development-plugin loading, and the callback-probe address fix. The catalog now has 107 tools (65 read-only, 42 mutating); follow `nextCursor` when listing more than 100 tools.
 
 Endpoints, all on `127.0.0.1`:
 
@@ -255,7 +255,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-107 tools: 66 read-only plus 41 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
+107 tools: 65 read-only plus 42 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
 input injection, and the IPC endpoint registry) that are hidden until `AllowMutatingTools` is on. Names are
 exactly as they appear in `tools/list`.
 
@@ -531,7 +531,7 @@ kinds and both timestamps.
 
 ## Safety model
 
-**Read-only by default.** 66 of the 107 tools read state; none writes it. The mutating gate is enforced, and the 41
+**Read-only by default.** 65 of the 107 tools read state; none writes it. The mutating gate is enforced, and the 42
 tools registered behind it — action casting, targeting and movement, chat, plugin management, addon-window control,
 Dear ImGui input injection and the IPC endpoint registry — stay invisible until `AllowMutatingTools` is turned on.
 

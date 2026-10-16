@@ -2,6 +2,7 @@ using System;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace DalamudMCP.Ipc;
 
@@ -16,8 +17,8 @@ public static class PluginIpcInvoker
     {
         return endpoint.Signature switch
         {
-            IpcSignatures.FuncBool => InvokeFuncBool(pi, endpoint),
-            IpcSignatures.FuncString => InvokeFuncString(pi, endpoint),
+            IpcSignatures.FuncBool => InvokeFuncBool(pi, endpoint, argumentJson),
+            IpcSignatures.FuncString => InvokeFuncString(pi, endpoint, argumentJson),
             IpcSignatures.FuncIntString => InvokeFuncIntString(pi, endpoint, argumentJson),
             IpcSignatures.ActionBool => InvokeActionBool(pi, endpoint, argumentJson),
             IpcSignatures.FuncBoolString => InvokeFuncBoolString(pi, endpoint, argumentJson),
@@ -25,16 +26,16 @@ public static class PluginIpcInvoker
         };
     }
 
-    private static object InvokeFuncBool(IDalamudPluginInterface pi, IpcEndpoint endpoint)
+    private static object InvokeFuncBool(IDalamudPluginInterface pi, IpcEndpoint endpoint, string? argumentJson)
     {
-        EnsureNoArguments(endpoint);
+        EnsureNoArguments(endpoint, argumentJson);
         var channel = pi.GetIpcSubscriber<bool>($"{endpoint.PluginName}.{endpoint.MethodName}");
         return new { invoked = true, result = channel.InvokeFunc() };
     }
 
-    private static object InvokeFuncString(IDalamudPluginInterface pi, IpcEndpoint endpoint)
+    private static object InvokeFuncString(IDalamudPluginInterface pi, IpcEndpoint endpoint, string? argumentJson)
     {
-        EnsureNoArguments(endpoint);
+        EnsureNoArguments(endpoint, argumentJson);
         var channel = pi.GetIpcSubscriber<string>($"{endpoint.PluginName}.{endpoint.MethodName}");
         return new { invoked = true, result = channel.InvokeFunc() };
     }
@@ -61,10 +62,11 @@ public static class PluginIpcInvoker
         return new { invoked = true, result = channel.InvokeFunc(value) };
     }
 
-    private static void EnsureNoArguments(IpcEndpoint endpoint)
+    private static void EnsureNoArguments(IpcEndpoint endpoint, string? argumentJson)
     {
         // Zero-argument signatures have nowhere to put a value; silently ignoring one
         // would make the call look successful while doing something unintended.
+        if (argumentJson != null) throw new ArgumentException($"signature '{endpoint.Signature}' takes no arguments.value");
     }
 
     private static T ReadValue<T>(IpcEndpoint endpoint, string? argumentJson)
@@ -73,7 +75,13 @@ public static class PluginIpcInvoker
             throw new ArgumentException($"signature '{endpoint.Signature}' requires arguments.value");
         try
         {
-            var value = JsonConvert.DeserializeObject<T>(argumentJson);
+            var token = JToken.Parse(argumentJson);
+            if ((typeof(T) == typeof(bool) && token.Type != JTokenType.Boolean) ||
+                (typeof(T) == typeof(int) && token.Type != JTokenType.Integer))
+                throw new ArgumentException($"arguments.value must be a JSON {typeof(T).Name}, without coercion");
+            if (typeof(T) == typeof(int) && (token.Value<long>() < int.MinValue || token.Value<long>() > int.MaxValue))
+                throw new ArgumentException("arguments.value is outside Int32 range");
+            var value = token.ToObject<T>();
             return value is null
                 ? throw new ArgumentException($"arguments.value is not a valid {typeof(T).Name}")
                 : value;

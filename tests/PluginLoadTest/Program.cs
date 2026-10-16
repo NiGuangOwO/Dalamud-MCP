@@ -350,6 +350,8 @@ internal static class Program
         Check("registry exposes read_memory", toolNames.Contains("read_memory"));
         Check("registry exposes query_events", toolNames.Contains("query_events"));
         Check("registry exposes call_plugin_ipc", toolNames.Contains("call_plugin_ipc"));
+        var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
+        Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
         Check("Plugin.ToolCount agrees with the registry", Equals(Prop(plugin, "ToolCount"), toolNames.Count));
 
         // ------------------------------------------------------------- running
@@ -432,6 +434,16 @@ internal static class Program
             var (guardPayload, guardError) = UnwrapToolResult(invalidGuard);
             Check("screen match rejects an incomplete phase guard before subscribing",
                 guardError && guardPayload?.Contains("guardValueIndex", StringComparison.Ordinal) == true);
+            Set(config, "AllowMutatingTools", false);
+            try
+            {
+                var disabledIpc = await CallAsync(http, baseUrl, sessionId,
+                    "{\"jsonrpc\":\"2.0\",\"id\":108,\"method\":\"tools/call\",\"params\":{\"name\":\"call_plugin_ipc\",\"arguments\":{\"pluginName\":\"test\",\"methodName\":\"test\"}}}").ConfigureAwait(false);
+                var (disabledPayload, disabledError) = UnwrapToolResult(disabledIpc);
+                Check("closed mutation gate refuses IPC before endpoint lookup",
+                    disabledError && disabledPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
+            }
+            finally { Set(config, "AllowMutatingTools", true); }
             Check("get_module_info returned its section map",
                 modulePayload is not null && modulePayload.Contains("\"sections\"", StringComparison.Ordinal),
                 FirstLine(modulePayload ?? moduleText));

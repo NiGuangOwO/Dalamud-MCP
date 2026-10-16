@@ -48,12 +48,13 @@ internal static class PluginBridgeTools
             "Call plugin IPC",
             "Invokes a previously registered endpoint. Signatures Func<bool> and Func<string> take no " +
             "argument; Func<int, string> expects arguments.value to be an integer; Action<bool> and " +
-            "Func<bool, string> expect arguments.value to be a boolean.",
+            "Func<bool, string> expect arguments.value to be a boolean. All IPC invocation requires " +
+            "AllowMutatingTools because a declared function can also change game/plugin state. Argument coercion is refused.",
             Json.Schema(
                 ("pluginName", "string", "InternalName of the target plugin", true),
                 ("methodName", "string", "Registered IPC method name", true),
-                ("value", "integer or string or boolean", "Optional argument for single-argument signatures", false)),
-            args => CallEndpoint(svc, hub, args));
+                ("value", "integer or boolean", "Exact JSON argument for single-argument signatures; omit for zero-argument signatures", false)),
+            args => CallEndpoint(svc, hub, args), mutating: true);
 
         registry.Add(
             "list_ipc_endpoints",

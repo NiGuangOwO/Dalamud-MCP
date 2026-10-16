@@ -8,7 +8,7 @@ Dalamud MCP 是一个 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatcor
 目标、FATE、货币、Excel 游戏数据，以及通过
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) 读取的任意经过校验的原始内存。
 
-MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 107 个工具 —— 66 个只读，外加 41 个可变更工具（可选开启），
+MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 107 个工具 —— 65 个只读，外加 42 个可变更工具（可选开启），
 能直接作用于游戏：施放技能、选择目标与移动、发送聊天、管理插件、操控 addon 窗口、注入 Dear ImGui 输入，以及与其他插件注册 IPC 端点。
 后台还有一个事件采集器，把游戏状态变化记入环形缓冲区，Agent 可以轮询变化而不必每回合重读完整状态。
 
@@ -128,14 +128,14 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 闸门在两处强制：可变更工具被从 `tools/list` 过滤掉，即使客户端知道名字，`tools/call` 也会以解释性错误拒绝。
 打开设置还会把标签从 "read-only (recommended)" 换成 "agents may change game state" 警告。
 
-**注意：** 闸门已完整实现并测试，可变更工具都在它之后交付。本文档列出的 41 个工具 —— 技能施放与选择目标、
+**注意：** 闸门已完整实现并测试，可变更工具都在它之后交付。本文档列出的 42 个工具 —— 技能施放与选择目标、
 自动移动、传送、聊天与斜杠命令、插件管理、addon 窗口控制、Dear ImGui 输入注入与 IPC 端点注册 —— 都能作用于游戏。
 全部被标记为可变更，因此在 `AllowMutatingTools` 打开之前，它们在 `tools/list` 中不可见、`tools/call` 会拒绝；
 其余 65 个工具仍然只读。
 
 ## 连接 Agent
 
-新增的逐帧 UI 节点观测、条件点击、组件节点定位、开发插件真实加载与回调探针修复，见 [开发工具说明](docs/addon-probes-and-dev-loader.md)。当前目录共 107 个工具（66 个只读、41 个可变更）；`tools/list` 单页最多 100 个，请继续读取 `nextCursor`。
+新增的逐帧 UI 节点观测、条件点击、组件节点定位、开发插件真实加载与回调探针修复，见 [开发工具说明](docs/addon-probes-and-dev-loader.md)。当前目录共 107 个工具（65 个只读、42 个可变更）；`tools/list` 单页最多 100 个，请继续读取 `nextCursor`。
 
 所有端点都在 `127.0.0.1` 上：
 
@@ -234,7 +234,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-107 个工具：66 个只读，外加 41 个可变更工具（控制、聊天、插件管理、addon 窗口、Dear ImGui 输入注入与 IPC 端点注册），在
+107 个工具：65 个只读，外加 42 个可变更工具（控制、聊天、插件管理、addon 窗口、Dear ImGui 输入注入与 IPC 端点注册），在
 `AllowMutatingTools` 打开前隐藏。名称与 `tools/list` 中完全一致。
 
 ### 客户端与会话
@@ -493,7 +493,7 @@ addon 的 vtable，这正是 `registered` 事件模式与监听器级 probe 存�
 
 ## 安全模型
 
-**默认只读。** 107 个工具中的 66 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 41 个工具
+**默认只读。** 107 个工具中的 65 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 42 个工具
 —— 技能施放、选择目标与移动、聊天、插件管理、addon 窗口控制、Dear ImGui 输入注入与 IPC 端点注册 —— 在 `AllowMutatingTools`
 打开前不可见。
 

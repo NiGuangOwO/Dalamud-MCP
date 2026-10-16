@@ -39,7 +39,8 @@ internal static class ClientTools
             "get_player_attributes",
             "Get player attributes",
             "Character sheet attributes (Strength, Dexterity, Vitality, Intelligence, Mind, Piety, " +
-            "crafting/gathering stats, resistances, and more) from the native PlayerState structure.",
+            "crafting/gathering stats, resistances, and more) from PlayerState. The attributes object " +
+            "contains current panel values including equipment; the six top-level primary stats are base values without equipment.",
             Json.Schema(),
             _ => PlayerAttributes(svc));
 

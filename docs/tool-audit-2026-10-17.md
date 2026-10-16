@@ -25,3 +25,11 @@ NativeUiReadTest passes 12/12 including the reproduced crash input, invalid node
 The unconditional delayed second Agent.Show was independently observed to close ContentsFinder at about 1273ms. open_addon now sends one Show, and callers wait for readiness. The duty list remains readable after 1800ms. Duty list tools refuse other addon layouts before native casts, and header detection uses the native SectionHeader discriminator instead of guessing from UIntValues[0]. Live wrong-layout read and mutation attempts against Inventory are refused; the actual 13-row list reports the two real category headers correctly. Duty registration/queue entry was not tested.
 
 The read-only health endpoint includes buildMvid so future development tests can verify the exact MCP host build, including when the host itself cannot be passed to load_dev_plugin.
+
+## IPC mutation and argument contract
+
+call_plugin_ipc was registered as read-only even though supported Action<bool> endpoints and arbitrary declared functions can mutate game state. All invocation now passes the existing mutation gate, and tool counts are 107 total: 65 read-only, 42 mutating. PluginLoadTest asserts the actual tool classification and demonstrates that a closed gate rejects a call before even looking up its endpoint.
+
+Arguments no longer silently coerce JSON strings or numbers into booleans/integers. Int32 overflow is refused. Zero-argument Func<bool>/Func<string> signatures used to silently ignore supplied values because EnsureNoArguments was empty; they now reject them before contacting any provider. IpcArgumentTest passes 10/10, and PluginLoadTest passes 105/105 at this stage. Schema metadata accepts only integer/boolean values. No external plugin Action<bool> was fired during the audit.
+
+The apparent primary-stat discrepancy is not an arithmetic defect: documented top-level fields are base stats, while attributes contains actual panel stats with equipment. Tool metadata now explicitly explains this existing distinction; returned values and compatibility are preserved.
