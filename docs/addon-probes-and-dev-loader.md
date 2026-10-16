@@ -44,6 +44,10 @@ This uses narrowly scoped, shape-checked reflection over Dalamud's managed devel
 
 `manage_plugin`'s `load` action uses the same verified loader. Other legacy actions still dispatch chat commands and must be followed by `plugin_list` or `plugin_describe`; their dispatch response is not proof of an actual lifecycle change.
 
+The loader also verifies build identity: it reads the DLL's PE module MVID without loading that file into MCP, waits for the installed plugin's loaded assembly to match it, and requires 750ms of stable loaded state. `buildMvid` and `buildVerified=true` are returned only after that check. Optional `buildWaitMs` bounds this wait (1000-30000ms, default 15000). If the DLL changes again, or auto-reload does not bring the expected build online, it returns an error. It does not force-reload an already loaded obsolete assembly when its watcher is disabled.
+
+This addresses an observed development race: a slash command sent immediately after a build could reach the old plugin instance, which then unloaded and lost the just-started test session. Call `load_dev_plugin` after building and before test commands, even if `plugin_list` already says the plugin is loaded. `tests/BuildIdentityTest` checks the metadata reader against a real loaded test assembly, a renamed copy and incomplete PE output.
+
 ## Callback-probe crash repair
 
 The old `probe_callback_enable` decoded the return from `ISigScanner.TryScanText` as an E8 relative call site. The scanner already resolves leading E8/E9 signatures, so the extra decode produced an invalid address and crashed `HookManager.FollowJmp`.

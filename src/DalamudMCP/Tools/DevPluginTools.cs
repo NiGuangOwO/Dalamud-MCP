@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -23,10 +24,11 @@ internal static class DevPluginTools
     public static void Register(ToolRegistry registry, GameServices svc)
     {
         registry.AddAsync("load_dev_plugin", "Register and load a local development plugin",
-            "Registers an absolute plugin DLL and its sibling manifest in Dalamud's developer locations, scans and loads it through the installed plugin manager, then reports the actual load state. Does not assume that sending a chat command succeeded. Existing development plugins are reused; a different installed path with the same internal name is refused. Uses version-checked managed reflection because Dalamud has no public loader API. Does not reload the MCP host.",
+            "Registers a local plugin DLL and sibling manifest, loads it through the installed plugin manager, then waits until the loaded assembly's MVID matches the file and remains loaded for 750ms. This prevents returning an old instance during build-triggered hot reload. Times out rather than claiming an obsolete build is ready. Conflicting installed paths and loading the MCP host itself are refused. Uses shape-checked managed reflection because Dalamud has no public loader API.",
             Json.Schema(
                 ("filePath", "string", "Absolute path to a local plugin DLL with a sibling JSON manifest.", true),
-                ("autoReload", "boolean", "Watch the build output for automatic reload (default true).", false)),
+                ("autoReload", "boolean", "Watch the build output for automatic reload (default true).", false),
+                ("buildWaitMs", "integer", "Wait for the matching loaded build, 1000-30000ms (default 15000).", false)),
             args => Load(svc, args), mutating: true);
     }
 
@@ -52,6 +54,12 @@ internal static class DevPluginTools
             throw new ToolException("filePath must be an absolute DLL path");
         path = Path.GetFullPath(path);
         if (!File.Exists(path)) throw new ToolException("plugin DLL does not exist");
+        var waitMs = args.Value<int?>("buildWaitMs") ?? 15000;
+        if (waitMs is < 1000 or > 30000) throw new ToolException("buildWaitMs must be 1000-30000");
+        Guid expectedBuild;
+        try { expectedBuild = DevBuildIdentity.Read(path); }
+        catch (Exception ex) when (ex is IOException or BadImageFormatException or InvalidOperationException)
+        { throw new ToolException($"plugin DLL metadata is not readable: {ex.Message}"); }
         var manifestPath = Path.ChangeExtension(path, ".json");
         if (!File.Exists(manifestPath)) throw new ToolException("sibling plugin manifest does not exist");
         var manifest = JObject.Parse(File.ReadAllText(manifestPath));
@@ -99,16 +107,36 @@ internal static class DevPluginTools
             var autoReload = plugin.GetType().GetProperty("AutomaticReload", All)
                 ?? throw new ToolException("unsupported Dalamud developer auto-reload setting");
             autoReload.SetValue(plugin, args.Value<bool?>("autoReload") ?? true);
-            if (Property(plugin, "IsLoaded") is not true)
+            save.Invoke(config, null);
+            // A watcher may already be unloading/loading this instance. Starting a
+            // second LoadAsync would race its lifecycle lock; await that build below.
+            var lifecycleState = Property(plugin, "State")?.ToString();
+            if (Property(plugin, "IsLoaded") is not true && lifecycleState is not ("Loading" or "Unloading"))
             {
                 if (!svc.Config.AllowMutatingTools) throw new ToolException("mutating tools disabled");
                 var load = Method(plugin, "LoadAsync", 3);
                 var task = (Task)load.Invoke(plugin, new object[] { PluginLoadReason.Installer, false, CancellationToken.None })!;
                 await task;
             }
-            var loaded = Property(plugin, "IsLoaded") is true;
-            if (!loaded) throw new ToolException($"plugin load did not complete: {Property(plugin, "State")}");
-            return new JObject { ["internalName"] = name, ["filePath"] = path, ["isLoaded"] = loaded, ["isDev"] = true, ["autoReload"] = (bool)autoReload.GetValue(plugin)! };
+            var timer = Stopwatch.StartNew();
+            long? matchingSince = null;
+            Guid? loadedBuild = null;
+            while (timer.ElapsedMilliseconds < waitMs)
+            {
+                if (!svc.Config.AllowMutatingTools) throw new ToolException("mutating tools disabled while waiting for plugin build");
+                if (DevBuildIdentity.Read(path) != expectedBuild) throw new ToolException("plugin DLL changed again while waiting; retry with the finished build");
+                loadedBuild = (Property(plugin, "Assembly") as Assembly)?.ManifestModule.ModuleVersionId;
+                if (Property(plugin, "IsLoaded") is true && loadedBuild == expectedBuild)
+                {
+                    matchingSince ??= timer.ElapsedMilliseconds;
+                    if (timer.ElapsedMilliseconds - matchingSince >= 750)
+                        return new JObject { ["internalName"] = name, ["filePath"] = path, ["isLoaded"] = true, ["isDev"] = true,
+                            ["autoReload"] = (bool)autoReload.GetValue(plugin)!, ["buildMvid"] = expectedBuild.ToString(), ["buildVerified"] = true };
+                }
+                else matchingSince = null;
+                await Task.Delay(100);
+            }
+            throw new ToolException($"matching plugin build did not become ready: state={Property(plugin, "State")}, expected={expectedBuild}, loaded={loadedBuild}; check auto-reload and Dalamud logs");
         }
         catch (TargetInvocationException ex) { throw new ToolException($"developer plugin operation failed: {ex.InnerException?.Message ?? ex.Message}"); }
         finally { Gate.Release(); }

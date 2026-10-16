@@ -15,3 +15,5 @@
 /tests/ProtocolSmokeTest/obj
 /tests/AddonGeometryTest/bin
 /tests/AddonGeometryTest/obj
+/tests/BuildIdentityTest/bin
+/tests/BuildIdentityTest/obj
