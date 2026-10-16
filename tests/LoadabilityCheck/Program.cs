@@ -413,14 +413,14 @@ internal static class Program
                 missing.Count == 0, missing.Count > 0 ? string.Join(", ", missing) : $"{concreteGauges.Count} covered");
 
             // Job ids 26 Arcanist, 29 Rogue, 36 Blue Mage have no dedicated gauge
-            // struct; 43 Beastmaster likewise (its gauge is served by the generic
-            // one). Everything else in the ClassJob range must be declared or
+            // struct. Beastmaster has a concrete gauge in the installed SDK.
+            // Everything else in the ClassJob range must be declared or
             // documented as absent.
             var ids = gaugeTable.Keys.OrderBy(k => k).ToList();
             Check("gauge table keys are plausible ClassJob ids",
                 ids.All(id => id is >= 1 and <= 43), string.Join(", ", ids));
 
-            var expectedJobGauges = new byte[] { 19, 20, 21, 22, 23, 24, 25, 27, 28, 30, 31, 32, 33, 34, 35, 37, 38, 39, 40, 41, 42 };
+            var expectedJobGauges = new byte[] { 19, 20, 21, 22, 23, 24, 25, 27, 28, 30, 31, 32, 33, 34, 35, 37, 38, 39, 40, 41, 42, 43 };
             var keyDiff = ids.Except(expectedJobGauges).Union(expectedJobGauges.Except(ids)).ToList();
             Check("gauge table covers exactly the combat jobs known to have gauges",
                 keyDiff.Count == 0, keyDiff.Count > 0 ? string.Join(", ", keyDiff) : $"{ids.Count} jobs");

@@ -97,6 +97,7 @@ internal static class StructTools
         [40] = "SageGauge",
         [41] = "ViperGauge",
         [42] = "PictomancerGauge",
+        [43] = "BeastmasterGauge",
     };
 
     private const string GaugeNamespace = "FFXIVClientStructs.FFXIV.Client.Game.Gauge";
@@ -255,10 +256,14 @@ internal static class StructTools
             result["looksLikeBattleChara"] = kindBytes[0] is 1 or 2;
             if (kindBytes[0] is not (1 or 2))
             {
-                result["warning"] = $"object kind {kindBytes[0]} is not Pc(1) or BattleNpc(2); only " +
-                                    "BattleChara-derived objects carry a StatusManager, so the " +
-                                    "values below read whatever occupies that offset";
+                result["available"] = false;
+                result["reason"] = "only Pc(1) and BattleNpc(2) objects have the supported BattleChara status layout";
+                return result;
             }
+        }
+        else
+        {
+            result["available"] = false; result["reason"] = "object kind is unreadable"; return result;
         }
 
         var managerAddress = address + BattleCharaStatusManagerOffset;
@@ -277,40 +282,36 @@ internal static class StructTools
         result["extraFlags"] = managerBytes[StatusManagerExtraFlagsOffset];
 
         var reported = managerBytes[StatusManagerNumValidStatusesOffset];
-        var usable = Math.Min((int)reported, StatusEntryCount);
+        var occupied = StatusSlotReader.Read(managerBytes.AsSpan(StatusEntriesOffset, StatusEntryCount * StatusEntrySize));
         var max = Math.Clamp(args["max"]?.Value<int?>() ?? StatusEntryCount, 1, StatusEntryCount);
-        var take = Math.Min(usable, max);
+        var take = Math.Min(occupied.Count, max);
 
         result["numValidStatuses"] = reported;
-        result["statusCountUnusable"] = reported > StatusEntryCount
-            ? $"the manager reports {reported} statuses but the array holds only {StatusEntryCount}"
-            : null;
+        result["slotCapacity"] = StatusEntryCount;
+        result["activeCount"] = occupied.Count;
+        result["count"] = take;
 
         var statuses = new JArray();
         for (var i = 0; i < take; i++)
         {
-            var offset = StatusEntriesOffset + (i * StatusEntrySize);
-            var statusId = (ushort)ReadRaw(managerBytes, offset, 2);
-            var param = (ushort)ReadRaw(managerBytes, offset + 2, 2);
-            var remaining = BitConverter.ToSingle(managerBytes, offset + 4);
-            var source = ReadRaw(managerBytes, offset + 8, 8);
+            var slot = occupied[i];
 
             var entry = new JObject
             {
-                ["index"] = i,
-                ["statusId"] = statusId,
-                ["param"] = param,
-                ["remainingTime"] = Conv.Round(remaining, 2),
-                ["sourceObjectId"] = $"0x{source:X}",
+                ["index"] = slot.Index,
+                ["statusId"] = slot.Id,
+                ["param"] = slot.Param,
+                ["remainingTime"] = Conv.Round(slot.Remaining, 2),
+                ["sourceObjectId"] = $"0x{slot.Source:X}",
             };
 
-            DescribeStatus(svc, statusId, entry);
+            DescribeStatus(svc, slot.Id, entry);
             statuses.Add(entry);
         }
 
         result["statuses"] = statuses;
 
-        var empty = usable - take;
+        var empty = occupied.Count - take;
         if (empty > 0) result["omitted"] = empty;
         return result;
     }
