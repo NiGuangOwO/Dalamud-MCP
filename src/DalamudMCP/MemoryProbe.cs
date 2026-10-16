@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace DalamudMCP;
@@ -168,19 +169,11 @@ public static class MemoryProbe
     /// <summary>Reads a typed value at an address, or null when unreadable.</summary>
     public static T? TryReadStruct<T>(ulong address, out string? error) where T : unmanaged
     {
-        var size = Marshal.SizeOf<T>();
+        var size = Unsafe.SizeOf<T>();
         var bytes = TryReadBytes(address, size, out error);
         if (bytes is null) return null;
-
-        var handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
-        try
-        {
-            return Marshal.PtrToStructure<T>(handle.AddrOfPinnedObject());
-        }
-        finally
-        {
-            handle.Free();
-        }
+        if (bytes.Length != size) { error = $"incomplete {typeof(T).Name}: {bytes.Length}/{size} readable bytes"; return null; }
+        return MemoryMarshal.Read<T>(bytes);
     }
 
     /// <summary>Reads a NUL-terminated UTF-8 string, bounded so a bad pointer cannot run away.</summary>

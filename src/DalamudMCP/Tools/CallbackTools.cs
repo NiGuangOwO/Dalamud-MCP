@@ -367,6 +367,8 @@ internal static class CallbackTools
                 "no loaded addon named 'ContentsFinder' was found; open the duty finder first, or pass the addon's raw addonId.");
         }
 
+        if (!string.Equals(unit->NameString, "ContentsFinder", StringComparison.Ordinal))
+            throw new ToolException("this tool requires the ContentsFinder addon; refusing a different native layout");
         var list = ((AddonContentsFinder*)unit)->DutyList;
         if (list is null)
         {
@@ -490,6 +492,8 @@ internal static class CallbackTools
             };
         }
 
+        if (!string.Equals(unit->NameString, "ContentsFinder", StringComparison.Ordinal))
+            throw new ToolException("this tool requires the ContentsFinder addon; refusing a different native layout");
         var addon = (AddonContentsFinder*)unit;
         var list = addon->DutyList;
         if (list is null)
@@ -532,9 +536,9 @@ internal static class CallbackTools
         };
     }
 
-    /// <summary>AutoDuty treats a first uint value of 0 or 1 as a section header row.</summary>
+    /// <summary>Use the native discriminator; UIntValues[0] is duty/category data, not a type.</summary>
     private static unsafe bool IsSectionHeader(AtkComponentTreeListItem* item) =>
-        item->UIntValues.Count > 0 && (item->UIntValues[0] == 0u || item->UIntValues[0] == 1u);
+        item->Type == TreeListItemType.SectionHeader;
 
     /// <summary>
     /// Reads a list row's label. The row's own string values are preferred; when they are

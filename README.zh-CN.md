@@ -320,7 +320,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 | 工具 | 描述 | 关键参数 |
 | --- | --- | --- |
-| `open_addon` | 通过拥有该窗口的 agent 的 `AgentInterface.Show()` 打开一个游戏内 addon/系统窗口 —— 与游戏自身 UI 走同一条路径。addon 名称必须来自约 66 个已验证 agent 的固定允许列表（背包、军械库、情感动作列表、任务日志、成就、坐骑/宠物图鉴、乐团演奏乐谱、传送、任务搜索器、套装、系统设置、货币、雇员、部队等）；未知或不可打开的名称会被拒绝而不是猜测。新创建的窗口在游戏刷新它之前会忽略合成点击，因此 `open_addon` 还会在约 1.2 秒后调度第二次 `Show()`。 | `addon`（必填，允许列表枚举） |
+| `open_addon` | 通过拥有该窗口的 agent 的 `AgentInterface.Show()` 打开一个游戏内 addon/系统窗口 —— 与游戏自身 UI 走同一条路径。addon 名称必须来自约 66 个已验证 agent 的固定允许列表（背包、军械库、情感动作列表、任务日志、成就、坐骑/宠物图鉴、乐团演奏乐谱、传送、任务搜索器、套装、系统设置、货币、雇员、部队等）；未知或不可打开的名称会被拒绝而不是猜测。打开只发送一次 Show 请求；等待窗口及控件就绪后再操作。 | `addon`（必填，允许列表枚举） |
 | `close_addon` | 通过 `AgentInterface.Hide()` 关闭同一个允许列表中的 addon 窗口。关闭本就未打开的窗口是无操作而非错误。 | `addon`（必填，枚举） |
 | `get_addon_state` | 只读普查：允许列表中哪些 agent 当前处于活动状态。报告 `active` 与 `inactive` 名称列表。 | 无 |
 | `list_addon_elements` | 遍历一个已加载 addon 的节点树（从根节点 DFS），报告每个节点的 id、类型、标签、尺寸、屏幕位置与是否可点击 —— UI 自动化的发现半边。组件节点（按钮、列表、下拉）报告其运行时组合类型。 | `addon` 或 `addonId`、`maxDepth`（默认 12）、`maxNodes`（默认 100） |

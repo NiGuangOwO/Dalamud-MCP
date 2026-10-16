@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using DalamudMCP.Mcp;
 using FFXIVClientStructs.FFXIV.Client.System.String;
@@ -116,7 +115,6 @@ internal static class UiTools
 
     public static void Register(ToolRegistry registry, GameServices svc)
     {
-        services = svc;
         var names = OpenableAgents.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray();
 
         registry.Add(
@@ -410,10 +408,6 @@ internal static class UiTools
         return WithAgent(agentId, addon, agent =>
         {
             agent->Show();
-            // A freshly created addon instance ignores synthetic clicks until the game
-            // has refreshed it once; a second Show() after a short delay restores click
-            // responsiveness (live-verified alternating open/click pattern).
-            ScheduleReshow(agentId, 1200);
             return new JObject
             {
                 ["addon"] = addon,
@@ -421,41 +415,6 @@ internal static class UiTools
                 ["opened"] = true,
             };
         });
-    }
-
-    /// <summary>Show() an agent a second time. Live-verified quirk: a freshly-created addon
-    /// instance's event dispatch is not ready after the first Show() — synthetic clicks sent
-    /// to it are silently ignored (reliably reproducible alternating open/click pattern on
-    /// the Currency addon). A second Show() one-plus game-frame later restores click
-    /// responsiveness, so OpenAddon schedules a delayed re-Show() fire-and-forget.</summary>
-    private static GameServices? services;
-
-    private static void ScheduleReshow(AgentId agentId, int delayMs)
-    {
-        var svc = services;
-        if (svc is null)
-            return;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(delayMs).ConfigureAwait(false);
-                await svc.Framework.RunOnFrameworkThread(() => ReshowAgent(agentId)).ConfigureAwait(false);
-            }
-            catch
-            {
-                // fire-and-forget: a failed re-Show only means the click-readiness
-                // quirk may resurface; never take the server down for it.
-            }
-        });
-    }
-
-    private static unsafe void ReshowAgent(AgentId agentId)
-    {
-        var mgr = SafeAgentModule();
-        var a = mgr is not null ? SafeAgent(mgr, agentId) : null;
-        if (a is not null)
-            a->Show();
     }
 
     private static unsafe object CloseAddon(JObject args)
@@ -1154,8 +1113,10 @@ internal static class UiTools
     {
         if (node is null || truncated || depth > maxDepth)
             return;
+        if (visited.Count >= 4096) { truncated = true; return; }
         if (!visited.Add((nuint)node))
             return;
+        if (!TryNative(node, out var nodeData)) return;
 
         var label = NodeLabel(node);
         var clickable = NodeClickable(node);
@@ -1170,33 +1131,29 @@ internal static class UiTools
             elements.Add(NodeJson(node, unit, label, clickable, depth));
         }
 
-        WalkNode(node->ChildNode, unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
-
         // A component node's contents live on the component's UldManager node list (its
         // AtkResNode* back-reference chains the component's own tree), not among the res-node
         // children — descend so buttons/lists inside components are listed.
         if (IsComponentType(node))
         {
             var compNode = ComponentNodeOf(node);
-            if (compNode is not null && compNode->Component is not null)
+            if (TryNative(compNode, out var componentNode) && TryNative(componentNode.Component, out var component))
             {
                 // The component's widget tree lives in its own UldManager node list; the
                 // AtkResNode back-reference is frequently null on live clients.
-                var compUld = compNode->Component->UldManager;
+                var compUld = component.UldManager;
                 var compCount = Math.Min((int)compUld.NodeListCount, 512);
                 if (compCount > 0 && compUld.NodeList is not null)
                 {
                     for (var i = 0; i < compCount && !truncated; i++)
-                        WalkNode(compUld.NodeList[i], unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
-                }
-                else if (compNode->Component->AtkResNode is not null)
-                {
-                    WalkNode(compNode->Component->AtkResNode, unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+                        if (TryNative((nint*)compUld.NodeList + i, out var child))
+                            WalkNode((AtkResNode*)child, unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
                 }
             }
         }
 
-        WalkNode(node->NextSiblingNode, unit, depth, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+        // ULD node arrays are authoritative. Child/sibling chains may contain aliases,
+        // cycles or stale links and must not be followed by this discovery tool.
     }
 
 
@@ -1206,6 +1163,7 @@ internal static class UiTools
         {
             ["nodeId"] = (int)node->NodeId,
             ["type"] = node->Type.ToString(),
+            ["componentType"] = IsComponentType(node) ? ComponentKindOf(ComponentNodeOf(node))?.ToString() : null,
             ["depth"] = depth,
             ["label"] = label,
             ["x"] = (int)node->ScreenX,
@@ -1222,7 +1180,13 @@ internal static class UiTools
     /// Component nodes report combined runtime type values (observed 1004 on live clients)
     /// rather than the bare 10000 enum constant, so component detection uses a >=1000 test.
     /// </summary>
-    private static unsafe bool IsComponentType(AtkResNode* node) => (int)node->Type >= 1000;
+    private static unsafe bool IsComponentType(AtkResNode* node) => TryNative(node, out var data) && (int)data.Type >= 1000;
+
+    private static unsafe bool TryNative<T>(T* pointer, out T value) where T : unmanaged
+    {
+        var read = MemoryProbe.TryReadStruct<T>((ulong)pointer, out _);
+        value = read.GetValueOrDefault(); return read.HasValue;
+    }
 
     /// <summary>
     /// Casts a component node directly instead of via <c>GetAsAtkComponentNode</c>:
@@ -1239,7 +1203,7 @@ internal static class UiTools
     /// <c>catch (Exception)</c> cannot intercept — it terminates ffxiv_dx11.exe.
     /// </summary>
     private static unsafe bool NodeVisible(AtkResNode* node) =>
-        node is not null && (node->NodeFlags & NodeFlags.Visible) != 0;
+        TryNative(node, out var data) && (data.NodeFlags & NodeFlags.Visible) != 0;
 
     /// <summary>
     /// Pure field read of the component's kind. Replaces the native
@@ -1250,29 +1214,32 @@ internal static class UiTools
     /// </summary>
     private static unsafe ComponentType? ComponentKindOf(AtkComponentNode* compNode)
     {
-        if (compNode is null)
-            return null;
-        var comp = compNode->Component;
-        if (comp is null)
-            return null;
-        if (comp->UldManager.BaseType != AtkUldManagerBaseType.Component)
+        if (!TryNative(compNode, out var node) || !TryNative(node.Component, out var comp)) return null;
+        if (comp.UldManager.BaseType != AtkUldManagerBaseType.Component)
             return null;
 
-        var data = (AtkUldComponentInfo*)comp->UldManager.ComponentData;
-        return data is null ? null : data->ComponentType;
+        // Objects points to AtkUldComponentInfo for component ULDs. ComponentData
+        // is navigation data (AtkUldComponentDataBase), not a component type header.
+        return TryNative((AtkUldComponentInfo*)comp.UldManager.Objects, out var data) ? data.ComponentType : null;
     }
 
     /// <summary>Reads a game-side Utf8String without any native call.</summary>
     private static unsafe string? ReadUtf8(Utf8String* text)
     {
-        if (text is null)
-            return null;
-        var s = text->ToString();
+        if (!TryNative(text, out var value)) return null;
+        var s = MemoryProbe.TryReadCString((ulong)(byte*)value.StringPtr, 4096, out _);
         return string.IsNullOrWhiteSpace(s) ? null : s;
     }
 
-    private static string? ReadCString(CStringPointer pointer) =>
-        pointer.HasValue ? pointer.ToString() : null;
+    private static unsafe string? ReadTextNode(AtkTextNode* pointer)
+    {
+        // Taking &pointer->NodeText emits ldflda, which can fault on the pointer
+        // before ReadUtf8 gets a chance to validate it. Copy the entire node first.
+        return TryNative(pointer, out var node) ? ReadUtf8(&node.NodeText) : null;
+    }
+
+    private static unsafe string? ReadCString(CStringPointer pointer) =>
+        pointer.HasValue ? MemoryProbe.TryReadCString((ulong)(byte*)pointer, 4096, out _) : null;
 
     /// <summary>
     /// Whether the node has a MouseClick handler registered, read straight off the
@@ -1280,9 +1247,11 @@ internal static class UiTools
     /// </summary>
     private static unsafe bool NodeHasMouseClickEvent(AtkResNode* node)
     {
-        for (var e = node->AtkEventManager.Event; e is not null; e = e->NextEvent)
+        if (!TryNative(node, out var data)) return false;
+        var next = data.AtkEventManager.Event;
+        for (var i = 0; i < 64 && TryNative(next, out var e); i++, next = e.NextEvent)
         {
-            if (e->State.EventType == AtkEventType.MouseClick)
+            if (e.State.EventType == AtkEventType.MouseClick)
                 return true;
         }
 
@@ -1291,24 +1260,24 @@ internal static class UiTools
 
     /// <summary>
     /// Label text for text/button/list nodes; null when the node carries no text. Every step
-    /// is a plain field read (Utf8String / CStringPointer / UldManager component kind) — no
-    /// reverse P/Invoke, so a stale or unexpected node can never kill the client process.
+    /// uses guarded complete struct/string copies. Plain pointer field reads and managed
+    /// catch blocks alone do not protect the client from access violations.
     /// </summary>
     private static unsafe string? NodeLabel(AtkResNode* node)
     {
         try
         {
-            if (node is null)
+            if (!TryNative(node, out var data))
                 return null;
 
-            if (node->Type == NodeType.Text)
-                return ReadUtf8(&((AtkTextNode*)node)->NodeText);
+            if (data.Type == NodeType.Text)
+                return ReadTextNode((AtkTextNode*)node);
 
             if (!IsComponentType(node))
                 return null;
 
             var compNode = ComponentNodeOf(node);
-            if (compNode is null)
+            if (!TryNative(compNode, out var componentNode))
                 return null;
 
             var kind = ComponentKindOf(compNode);
@@ -1318,8 +1287,9 @@ internal static class UiTools
             // Button: its own text node.
             if (kind == ComponentType.Button)
             {
-                var textNode = ((AtkComponentButton*)compNode->Component)->ButtonTextNode;
-                var text = ReadUtf8(textNode is null ? null : &textNode->NodeText);
+                if (!TryNative((AtkComponentButton*)componentNode.Component, out var button)) return null;
+                var textNode = button.ButtonTextNode;
+                var text = ReadTextNode(textNode);
                 if (text is not null)
                     return text;
             }
@@ -1327,15 +1297,15 @@ internal static class UiTools
             // List: first item labels, so the agent can see what's selectable.
             if (kind == ComponentType.List)
             {
-                var list = (AtkComponentList*)compNode->Component;
-                if (list is null || list->ItemLabels is null)
+                if (!TryNative((AtkComponentList*)componentNode.Component, out var list) || list.ItemLabels is null)
                     return null;
 
                 var items = new JArray();
-                var count = Math.Min(list->ListLength, 8);
+                var count = Math.Min(list.ListLength, 8);
                 for (var i = 0; i < count; i++)
                 {
-                    var label = ReadCString(list->ItemLabels[i]);
+                    if (!TryNative(list.ItemLabels + i, out var pointer)) continue;
+                    var label = ReadCString(pointer);
                     if (label is not null)
                         items.Add(label);
                 }
@@ -1354,16 +1324,16 @@ internal static class UiTools
     /// <summary>Whether a node can plausibly receive click events.</summary>
     private static unsafe bool NodeClickable(AtkResNode* node)
     {
-        if (node is null)
+        if (!TryNative(node, out var data))
             return false;
 
-        if (node->Type == NodeType.Collision)
-            return (node->NodeFlags & NodeFlags.RespondToMouse) != 0 || NodeHasMouseClickEvent(node);
+        if (data.Type == NodeType.Collision)
+            return (data.NodeFlags & NodeFlags.RespondToMouse) != 0 || NodeHasMouseClickEvent(node);
 
         if (IsComponentType(node))
         {
             var compNode = ComponentNodeOf(node);
-            if (compNode is null || compNode->Component is null)
+            if (!TryNative(compNode, out var component) || component.Component is null)
                 return false;
 
             var clickableKind = ComponentKindOf(compNode) is ComponentType.Button

@@ -202,6 +202,7 @@ public sealed class McpServer : IDisposable
             status = "ok",
             server = ServerName,
             version = ServerVersion,
+            buildMvid = typeof(McpServer).Module.ModuleVersionId,
             protocolVersions = SupportedProtocolVersions,
             tools = registry.Visible().Count(),
             mutatingToolsEnabled = allowMutating,
