@@ -44,6 +44,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly GameServices services;
     private readonly ToolRegistry registry;
+    private readonly AddonProbeTools addonProbe;
     private readonly WindowSystem windowSystem = new("DalamudMCP");
     private readonly ConfigWindow configWindow;
     private readonly EventHub eventHub = new();
@@ -136,6 +137,7 @@ public sealed class Plugin : IDalamudPlugin
         MemoryTools.Register(registry, services);
         StructTools.Register(registry, services);
         UiTools.Register(registry, services);
+        addonProbe = new AddonProbeTools(registry, services);
         CallbackTools.Register(registry, services);
         ImGuiInputTools.Register(registry, services);
         InventoryTools.Register(registry, services);
@@ -147,6 +149,7 @@ public sealed class Plugin : IDalamudPlugin
         ChatTools.Register(registry, services);
         QuestTools.Register(registry, services);
         PluginManagementTools.Register(registry, services);
+        DevPluginTools.Register(registry, services);
         PluginBridgeTools.Register(registry, services, ipcHub);
         EventTools.Register(registry, services, eventHub);
         ChatLogTools.Register(registry, chatLogHub);
@@ -358,6 +361,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        addonProbe.Dispose();
         commandManager.RemoveHandler(CommandName);
 
         ImGuiInputTools.Unregister();

@@ -188,6 +188,7 @@ internal static class UiTools
                 ("addon", "string", "Addon name to click inside (same names open_addon accepts)", false),
                 ("addonId", "integer", "Raw AtkUnitBase id of the addon to click inside (overrides addon)", false),
                 ("nodeId", "integer", "Target node id from list_addon_elements", false),
+                ("componentId", "integer", "Optional top-level component node id. Resolve nodeId only inside this component, avoiding duplicate child ids elsewhere in the addon.", false),
                 ("index", "integer", "For list components: the item index to click instead of a nodeId", false),
                 ("event", "string", "Which event to dispatch: click (default), doubleClick, buttonClick, buttonPress, buttonRelease, or 'registered' to fire every handler the node has registered (closest to a real mouse click)", false),
                 ("param", "integer", "Override the event callback param (uint32). Advanced: the game normally derives it from the node's registered handler; ClickLib-style close buttons need 0xFFFFFFFF (-1)", false)),
@@ -539,7 +540,7 @@ internal static class UiTools
         };
     }
 
-    private static unsafe object ClickAddonElement(JObject args)
+    internal static unsafe object ClickAddonElement(JObject args)
     {
         var addonName = args["addon"]?.Value<string>();
         var addonIdArg = args["addonId"];
@@ -607,8 +608,10 @@ internal static class UiTools
         // nested node, whereas the RootNode child chain only exposes one linked child.
         // Duplicate ids are common (per-row components reuse ids 2-7), so among all matches
         // prefer a visible + clickable node; a bare Res/text match is the last resort.
-        var node = FindBestInUld(unit, nodeId, out var bestScore);
-        if (node is null || bestScore < 3)
+        var scoped = args.Value<uint?>("componentId");
+        var bestScore = 0;
+        var node = scoped.HasValue ? AddonProbeTools.FindNode(unit, nodeId, scoped) : FindBestInUld(unit, nodeId, out bestScore);
+        if (!scoped.HasValue && (node is null || bestScore < 3))
         {
             var fromRoot = FindBestNode(unit->RootNode, nodeId, out var rootScore);
             if (rootScore > bestScore)

@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 102;
+    private const int ExpectedTools = 106;
 
     private static int checks;
     private static int failures;
@@ -408,6 +408,20 @@ internal static class Program
                 "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"get_module_info\",\"arguments\":{}}}").ConfigureAwait(false);
             var (modulePayload, moduleError) = UnwrapToolResult(moduleText);
             Check("tools/call get_module_info did not error", !moduleError, FirstLine(modulePayload ?? moduleText));
+            // Regression: unresolved FCS pointers must be rejected before the hook engine
+            // can dereference them. The offline host intentionally has no game addresses.
+            var probeText = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":104,\"method\":\"tools/call\",\"params\":{\"name\":\"probe_callback_enable\",\"arguments\":{}}}").ConfigureAwait(false);
+            var (probePayload, probeError) = UnwrapToolResult(probeText);
+            Check("callback probe safely rejects an unresolved function pointer",
+                probeError && probePayload?.Contains("not executable", StringComparison.Ordinal) == true,
+                FirstLine(probePayload ?? probeText));
+            var sampleText = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":105,\"method\":\"tools/call\",\"params\":{\"name\":\"sample_addon_nodes\",\"arguments\":{\"addon\":\"Hummer\",\"nodeIds\":[],\"frames\":180}}}").ConfigureAwait(false);
+            var (samplePayload, sampleError) = UnwrapToolResult(sampleText);
+            Check("addon sampler rejects an empty node selection before subscribing",
+                sampleError && samplePayload?.Contains("nodeIds", StringComparison.Ordinal) == true,
+                FirstLine(samplePayload ?? sampleText));
             Check("get_module_info returned its section map",
                 modulePayload is not null && modulePayload.Contains("\"sections\"", StringComparison.Ordinal),
                 FirstLine(modulePayload ?? moduleText));

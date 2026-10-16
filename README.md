@@ -9,7 +9,7 @@ the client itself uses: the object table, the local player, party and alliance, 
 game data, and arbitrary validated raw memory through
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 
-An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 102 tools — 63 read-only, plus 39 mutating tools
+An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 106 tools — 65 read-only, plus 41 mutating tools
 (opt-in) that can act on the game: cast actions, target and move, send chat, manage plugins, drive addon windows,
 inject Dear ImGui input, and register IPC endpoints with other plugins. A background event collector also records game-state changes into
 a ring buffer that an agent can poll instead of re-reading full state.
@@ -141,13 +141,15 @@ installing a plugin. The gate is enforced in two places: mutating tools are filt
 `tools/call` rejects them with an explanatory error even if the client knows the name. Turning the setting on also
 changes the label from "read-only (recommended)" to a warning that "agents may change game state".
 
-**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 39 tools listed in
+**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 41 tools listed in
 this document — action casting and targeting, auto-movement, teleporting, chat and slash commands, plugin
 management, addon-window control, Dear ImGui input injection, and the IPC endpoint registry — can act on the game.
 All of them are flagged mutating, so they stay invisible in `tools/list` and reject `tools/call` until
-`AllowMutatingTools` is turned on; the other 63 tools remain read-only.
+`AllowMutatingTools` is turned on; the other 65 tools remain read-only.
 
 ## Connect an agent
+
+See [addon probes and the verified developer loader](docs/addon-probes-and-dev-loader.md) for frame-aligned node sampling, conditional input, component-scoped node lookup, development-plugin loading, and the callback-probe address fix. The catalog now has 106 tools (65 read-only, 41 mutating); follow `nextCursor` when listing more than 100 tools.
 
 Endpoints, all on `127.0.0.1`:
 
@@ -253,7 +255,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-102 tools: 63 read-only plus 39 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
+106 tools: 65 read-only plus 41 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
 input injection, and the IPC endpoint registry) that are hidden until `AllowMutatingTools` is on. Names are
 exactly as they appear in `tools/list`.
 
@@ -529,7 +531,7 @@ kinds and both timestamps.
 
 ## Safety model
 
-**Read-only by default.** 63 of the 102 tools read state; none writes it. The mutating gate is enforced, and the 39
+**Read-only by default.** 65 of the 106 tools read state; none writes it. The mutating gate is enforced, and the 41
 tools registered behind it — action casting, targeting and movement, chat, plugin management, addon-window control,
 Dear ImGui input injection and the IPC endpoint registry — stay invisible until `AllowMutatingTools` is turned on.
 
@@ -642,7 +644,7 @@ say the token is missing) and once **with** it.
 TypeScript implementation, pinned at `1.30.1`) rather than hand-written JSON-RPC, so the framing is judged by an
 independent implementation. The official client completes `initialize`, reads back the server's identity, parses
 `tools/list`, round-trips a tool call, receives a tool error as `isError` rather than a transport failure, and
-keeps working afterwards. Its fourth phase validates all 102 **shipped** schemas — `PluginLoadTest` dumps every
+keeps working afterwards. Its fourth phase validates all 106 **shipped** schemas — `PluginLoadTest` dumps every
 page of its `tools/list` payload when `DALAMUD_MCP_DUMP_TOOLS` is set, and that payload is run through the SDK's declared
 `ToolSchema` and then compiled against the JSON Schema 2020-12 meta-schema using the `ajv` bundled inside the SDK.
 
@@ -652,7 +654,7 @@ anything:
 - The SDK's own `ToolSchema` validation is too lenient to catch this project's defect class: it types
   `inputSchema` as an object with a `"type"` of `"object"` and a `properties` record whose values are only checked
   to be *objects*, never that a property's `type` is one of JSON Schema's legal names. Re-injecting the original
-  `{"type":"array of integer"}` defect into the real 102-tool payload still passed it. The label therefore says
+  `{"type":"array of integer"}` defect into the real 106-tool payload still passed it. The label therefore says
   only what it proves, and the ajv meta-schema pass — added alongside it — rejects the defect with an independent
   message: `type must be JSONType or JSONType[]: array of integer`.
 - `negative.mjs` points the official client at a deliberately non-conforming server and requires it to fail. It
@@ -732,7 +734,7 @@ persisting the setting), and an out-of-range port must be refused **without** ch
 The memory tools are verified against real memory here too. `MemoryProbe` reads the current process via
 `ReadProcessMemory(GetCurrentProcess(), ...)`, and the load test hosts the plugin in its own process, so it can pin
 a known byte pattern and assert the tool returns exactly those bytes back. The safety guard is checked by reading
-address `0x1` and requiring a phrased refusal. Every one of the 102 shipped tool schemas is validated from
+address `0x1` and requiring a phrased refusal. Every one of the 106 shipped tool schemas is validated from
 `tools/list` over the real socket: each `inputSchema` must be a JSON object with an object `properties`, every
 property must carry a `type` that is one of JSON Schema's seven legal names, every `array` must say what its `items`
 are, and every name in `required` must actually be declared. The same section cross-checks schema against

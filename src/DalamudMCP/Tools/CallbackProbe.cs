@@ -19,9 +19,8 @@ namespace DalamudMCP.Tools;
 /// row ultimately funnels into one of these calls, so the captured (addon, values)
 /// pairs are exactly the payloads an automation agent needs to reproduce in-game
 /// actions without synthetic ATK events.
-/// FireCallback is a NON-virtual member function (FCS [MemberFunction] sig
-/// "E8 ?? ?? ?? ?? 0F B6 E8 8B 44 24 20"), so the patch is an inline detour resolved
-/// through FCS's generated address, installed via Dalamud's IGameInteropProvider —
+/// FireCallback is a NON-virtual member function. Its entry point comes directly
+/// from FCS's resolved member-function pointer, installed via IGameInteropProvider —
 /// the same engine SimpleTweaks uses through its Hook&lt;T&gt; helper.
 /// </summary>
 internal static unsafe class CallbackProbe
@@ -53,7 +52,6 @@ internal static unsafe class CallbackProbe
     public static readonly ConcurrentQueue<CapturedCallback> Captured = new();
 
     private static IGameInteropProvider? interop;
-    private static ISigScanner? sigScanner;
     private static Hook<FireCallbackDelegate>? hook;
     private static FireCallbackDelegate? detourDelegate;
 
@@ -61,7 +59,6 @@ internal static unsafe class CallbackProbe
     public static void Initialize(IGameInteropProvider provider, ISigScanner scanner)
     {
         interop = provider;
-        sigScanner = scanner;
     }
 
     public static bool IsHooked => hook?.IsEnabled == true;
@@ -69,28 +66,26 @@ internal static unsafe class CallbackProbe
     /// <summary>Install the FireCallback hook. Idempotent.</summary>
     public static object Enable()
     {
-        if (interop is null || sigScanner is null)
+        if (interop is null)
             return Json.ToolError("callback probe not initialized (no interop provider)");
 
         if (hook is null)
         {
-            // FCS's MemberFunction signature "E8 ?? ?? ?? ?? 0F B6 E8 8B 44 24 20"
-            // matches the CALL SITE of FireCallback inside the game binary, not the
-            // function itself. Resolve the call site, then read the E8 rel32 to get
-            // the real FireCallback entry point.
+            // ScanText already resolves leading E8/E9 signatures. Decoding its
+            // return value as another rel32 produced a bogus address and crashed
+            // HookManager.FollowJmp. Use FCS's resolved function entry, and refuse
+            // unmapped/non-executable pointers before the native hook engine.
             try
             {
-                if (!sigScanner.TryScanText(Signature, out var callSite))
-                    return Json.ToolError($"FireCallback call-site signature not found: {Signature}");
-
-                var target = (IntPtr)(*(int*)(callSite + 1) + callSite + 5);
-                if (target == IntPtr.Zero)
-                    return Json.ToolError("FireCallback call site decoded to a null target");
+                var target = (IntPtr)AtkUnitBase.MemberFunctionPointers.FireCallback;
+                var region = MemoryProbe.Query((ulong)(nuint)target);
+                if (region is not { Committed: true, Readable: true, Executable: true, Guarded: false })
+                    throw new ToolException("FireCallback function pointer is unresolved or not executable; probe not installed");
 
                 detourDelegate ??= FireCallbackDetour;
                 hook = interop.HookFromAddress<FireCallbackDelegate>(target, FireCallbackDetour);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not ToolException)
             {
                 return Json.ToolError($"FireCallback hook creation failed: {ex.Message}");
             }

@@ -30,10 +30,10 @@ internal static unsafe class ChatTools
             args => SendChat(svc, args),
             mutating: true);
 
-        registry.Add(
+        registry.AddAsync(
             "manage_plugin",
             "Manage plugin",
-            "Loads, unloads or reloads a Dalamud plugin through its chat commands. action: load (needs " +
+            "Loads a development plugin with verified state; other actions dispatch legacy chat commands and only confirm dispatch, not completion. action: load (needs " +
             "filePath), unload (needs pluginName), reload (needs both), all (reload every plugin). " +
             "Reloading this plugin would sever the MCP session, so it is refused.",
             Json.SchemaWithEnum(
@@ -43,7 +43,9 @@ internal static unsafe class ChatTools
                 true,
                 ("pluginName", "string", "Plugin InternalName (unload/reload)", false),
                 ("filePath", "string", "Full path to the plugin DLL (load/reload)", false)),
-            args => ManagePlugin(svc, args),
+            args => string.Equals(args.Value<string>("action"), "load", StringComparison.OrdinalIgnoreCase)
+                ? DevPluginTools.Load(svc, args)
+                : svc.Framework.RunOnFrameworkThread<object?>(() => ManagePlugin(svc, args)),
             mutating: true);
 
         registry.Add(
