@@ -22,6 +22,20 @@ Added during Crystal Tower Striker development on 2026-10-16. All game observati
 
 `click_addon_element` now also accepts `componentId`. This is necessary when child IDs are duplicated across component instances. For example, `componentId=29,nodeId=4` resolves Hummer's button collision node instead of an unrelated top-level resource node 4.
 
+## Screen-space alignment (Monster Toss development)
+
+Snapshots and samples now include native `screenX`/`screenY`, origin, rotation, parent id and the 2x2 transform matrix. The first 32 integer/unsigned/float/bool AtkValues are captured in the same framework frame as the nodes; other value types are omitted and `valueCount` reports the full table length.
+
+`click_addon_when_node_matches` optionally accepts `targetNodeId` instead of `minWidth`/`maxWidth`. It compares the observed node's screen-space right edge with the marker's transformed horizontal center. `targetFraction` selects the central fraction of the marker width (default 0.5), preserving behavior under UI zoom. Native ScreenX already incorporates the origin and ancestor transforms: summing local X values can give the wrong aim. Rotated, reflected, hidden, degenerate and non-finite geometry cannot trigger this mode.
+
+The optional `guardValueIndex` with `guardValue` or `guardValues` restricts input to a scalar addon state, evaluated in that same frame. This avoids a separate state-read/input race. For BasketBall, first-shot phase 2 and subsequent-shot phase 3 are both playable:
+
+```json
+{"addon":"BasketBall","observeNodeId":14,"clickNodeId":10,"targetNodeId":18,"targetFraction":0.5,"guardValueIndex":0,"guardValues":[2,3],"event":"buttonPress","param":0,"frames":600}
+```
+
+The Monster Toss experiment observed local-coordinate aim 203 miss, while screen-aligned aim 223 produced the game's native success callback `[11,1,0]`. Each successful shot moves the target marker, so the geometry must be recomputed every frame. `tests/AddonGeometryTest` covers those observations, zoom invariance, target movement and invalid geometry.
+
 ## Development plugin loader
 
 `load_dev_plugin` takes an absolute `filePath` ending in `.dll`, with a sibling `.json` manifest, and optional `autoReload` (default true). It validates the manifest's API against the installed Dalamud, registers the developer location, asks PluginManager to scan, loads the resulting LocalDevPlugin and verifies `IsLoaded`. Existing developer plugins at the same path are reused. A conflicting installed internal name at a different path, non-dev instance, or the MCP host itself is refused.

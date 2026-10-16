@@ -26,7 +26,7 @@ internal sealed class AddonProbeTools : IDisposable
             ("componentId", "integer", "Optional top-level component node id; scopes nodeIds to that component's UldManager.", false),
             ("nodeIds", "array of integer", "Top-level UldManager node ids (1-32 unique ids). Component children are deliberately excluded to avoid ambiguous ids.", true));
         registry.Add("get_addon_node_snapshot", "Read precise addon node state",
-            "Reads local geometry, scale, visibility, node addresses and animation timeline fields on the framework thread. No input or memory writes.",
+            "Reads local and screen geometry, native transform matrices, origins, parent ids, visibility, node addresses, animation timelines and the addon's scalar values together on the framework thread. No input or memory writes.",
             schema, Read);
         var traceSchema = (JObject)schema.DeepClone();
         ((JObject)traceSchema["properties"]!).Add("frames", new JObject { ["type"] = "integer", ["description"] = "Number of frames to observe, 1-600 (default 180)." });
@@ -35,13 +35,18 @@ internal sealed class AddonProbeTools : IDisposable
             "Collects frame-aligned snapshots without blocking the game. One sampler at a time, 600 frames maximum, 20 second timeout. Stops if the addon closes or changes identity; unload cancels and removes the listener.",
             traceSchema, args => Sample(args));
         registry.AddAsync("click_addon_when_node_matches", "Click once when a node reaches a width range",
-            "Observes an addon on each framework frame and dispatches one UI event when the observed node is visible and its width enters the requested inclusive range. The target must also be visible and enabled. Bounded to 600 frames / 20 seconds; addon replacement and disabling mutating tools cancel the request. Useful for latency-sensitive native UI controls.",
+            "Observes an addon on each framework frame and dispatches one UI event when the observed node enters a width range, or its screen-space right edge aligns with the center of targetNodeId. Screen matching uses native transforms and rejects rotated/reflected geometry. The clicked control must be visible and enabled. Optional integer addon-value guard is checked in the same frame. Bounded to 600 frames / 20 seconds; addon replacement and disabling mutating tools cancel the request.",
             Json.Schema(
                 ("addon", "string", "Exact internal addon name.", true),
                 ("observeNodeId", "integer", "Top-level node whose width is observed.", true),
                 ("clickNodeId", "integer", "Top-level visible and enabled node to click once.", true),
-                ("minWidth", "integer", "Inclusive minimum observed width, 0-65535.", true),
-                ("maxWidth", "integer", "Inclusive maximum observed width, 0-65535.", true),
+                ("minWidth", "integer", "Inclusive minimum width, 0-65535; required without targetNodeId.", false),
+                ("maxWidth", "integer", "Inclusive maximum width, 0-65535; required without targetNodeId.", false),
+                ("targetNodeId", "integer", "Optional top-level target marker. Match the observed right edge against its transformed horizontal center.", false),
+                ("targetFraction", "number", "Central fraction of the marker width to accept, greater than 0 and at most 1 (default 0.5). Scales with UI zoom.", false),
+                ("guardValueIndex", "integer", "Optional integer AtkValue index, 0-31; requires guardValue or guardValues.", false),
+                ("guardValue", "integer", "Expected integer AtkValue at guardValueIndex; input is sent only while it matches.", false),
+                ("guardValues", "array of integer", "Alternative to guardValue: 1-16 accepted integer values at guardValueIndex.", false),
                 ("frames", "integer", "Maximum frames to wait, 1-600 (default 180).", false),
                 ("event", "string", "UI event name accepted by click_addon_element (default buttonPress).", false),
                 ("param", "integer", "Explicit event parameter, if needed.", false)),
@@ -98,6 +103,15 @@ internal sealed class AddonProbeTools : IDisposable
             {
                 ["nodeId"] = id, ["available"] = true, ["address"] = $"0x{(nuint)node:X}",
                 ["type"] = node->Type.ToString(), ["x"] = node->X, ["y"] = node->Y,
+                ["screenX"] = node->ScreenX, ["screenY"] = node->ScreenY,
+                ["originX"] = node->OriginX, ["originY"] = node->OriginY,
+                ["rotation"] = node->Rotation,
+                ["parentNodeId"] = node->ParentNode == null ? null : (long?)node->ParentNode->NodeId,
+                ["transform"] = new JObject
+                {
+                    ["m11"] = node->Transform.M11, ["m12"] = node->Transform.M12,
+                    ["m21"] = node->Transform.M21, ["m22"] = node->Transform.M22,
+                },
                 ["width"] = node->Width, ["height"] = node->Height,
                 ["scaleX"] = node->ScaleX, ["scaleY"] = node->ScaleY,
                 ["visible"] = (node->NodeFlags & NodeFlags.Visible) != 0,
@@ -111,10 +125,26 @@ internal sealed class AddonProbeTools : IDisposable
                 },
             });
         }
+        var values = new JArray();
+        for (var i = 0; i < Math.Min((int)unit->AtkValuesCount, 32); i++)
+        {
+            var value = &unit->AtkValues[i];
+            JToken? scalar = value->Type switch
+            {
+                AtkValueType.Int => new JValue(value->Int),
+                AtkValueType.UInt => new JValue(value->UInt),
+                AtkValueType.Float => new JValue(value->Float),
+                AtkValueType.Bool => new JValue(value->Byte != 0),
+                _ => null,
+            };
+            if (scalar != null) values.Add(new JObject { ["index"] = i, ["type"] = value->Type.ToString(), ["value"] = scalar });
+        }
         return new JObject
         {
             ["available"] = true, ["addon"] = name, ["addonId"] = unit->Id,
             ["address"] = $"0x{(nuint)unit:X}", ["visible"] = unit->IsVisible, ["nodes"] = nodes,
+            ["values"] = values,
+            ["valueCount"] = unit->AtkValuesCount,
         };
     }
 
@@ -122,15 +152,34 @@ internal sealed class AddonProbeTools : IDisposable
 
     private Task<object?> ClickWhen(JObject args)
     {
-        foreach (var key in new[] { "addon", "observeNodeId", "clickNodeId", "minWidth", "maxWidth" })
+        foreach (var key in new[] { "addon", "observeNodeId", "clickNodeId" })
             if (args[key] is null || args[key]!.Type == JTokenType.Null) throw new ToolException($"{key} is required");
-        var min = args.Value<int>("minWidth");
-        var max = args.Value<int>("maxWidth");
-        if (min < 0 || max > ushort.MaxValue || min > max) throw new ToolException("invalid width range");
+        var marker = args.Value<uint?>("targetNodeId");
+        if (marker == null)
+        {
+            if (args["minWidth"] == null || args["maxWidth"] == null) throw new ToolException("minWidth/maxWidth or targetNodeId is required");
+            var min = args.Value<int>("minWidth");
+            var max = args.Value<int>("maxWidth");
+            if (min < 0 || max > ushort.MaxValue || min > max) throw new ToolException("invalid width range");
+        }
+        else
+        {
+            var fraction = args.Value<double?>("targetFraction") ?? 0.5;
+            if (!double.IsFinite(fraction) || fraction <= 0 || fraction > 1) throw new ToolException("targetFraction must be greater than 0 and at most 1");
+        }
+        var guardIndex = args.Value<int?>("guardValueIndex");
+        var hasGuardValue = args["guardValue"] is { Type: not JTokenType.Null };
+        var hasGuardValues = args["guardValues"] is { Type: not JTokenType.Null };
+        if (guardIndex is < 0 or > 31 || (hasGuardValue && hasGuardValues) || guardIndex.HasValue != (hasGuardValue || hasGuardValues))
+            throw new ToolException("guardValueIndex (0-31) requires exactly one of guardValue or guardValues");
+        if (hasGuardValues && (args["guardValues"] is not JArray accepted || accepted.Count is < 1 or > 16 || accepted.Any(v => v.Type != JTokenType.Integer)))
+            throw new ToolException("guardValues must contain 1-16 integers");
         var observe = args.Value<uint>("observeNodeId");
         var click = args.Value<uint>("clickNodeId");
         var sampleArgs = (JObject)args.DeepClone();
+        if (hasGuardValue) sampleArgs["guardValues"] = new JArray(args.Value<long>("guardValue"));
         sampleArgs["nodeIds"] = new JArray(observe, click);
+        if (marker.HasValue) ((JArray)sampleArgs["nodeIds"]!).Add(marker.Value);
         var clickArgs = new JObject
         {
             ["addon"] = args["addon"], ["nodeId"] = click,
@@ -181,9 +230,15 @@ internal sealed class AddonProbeTools : IDisposable
                     var nodes = (JArray)snapshot["nodes"]!;
                     var observed = nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == args.Value<uint>("observeNodeId"));
                     var target = nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == args.Value<uint>("clickNodeId"));
+                    var markerId = args.Value<uint?>("targetNodeId");
+                    var matches = markerId.HasValue
+                        ? NodeScreenMatch.Matches(Screen(observed), Screen(nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == markerId.Value)), args.Value<double?>("targetFraction") ?? 0.5)
+                        : observed.Value<int>("width") >= args.Value<int>("minWidth") && observed.Value<int>("width") <= args.Value<int>("maxWidth");
+                    var guardIndex = args.Value<int?>("guardValueIndex");
+                    var guard = guardIndex.HasValue ? ((JArray)snapshot["values"]!).OfType<JObject>().FirstOrDefault(v => v.Value<int>("index") == guardIndex.Value) : null;
+                    var guardMatches = !guardIndex.HasValue || (guard != null && guard.Value<string>("type") is "Int" or "UInt" && ((JArray)args["guardValues"]!).Any(v => v.Value<long>() == guard.Value<long>("value")));
                     if (snapshot.Value<bool>("visible") && observed.Value<bool>("available") && observed.Value<bool>("visible") &&
-                        target.Value<bool>("available") && target.Value<bool>("visible") && target.Value<bool>("enabled") &&
-                        observed.Value<int>("width") >= args.Value<int>("minWidth") && observed.Value<int>("width") <= args.Value<int>("maxWidth"))
+                        target.Value<bool>("available") && target.Value<bool>("visible") && target.Value<bool>("enabled") && matches && guardMatches)
                     {
                         clickResult = UiTools.ClickAddonElement(clickArgs);
                         reason = "triggered";
@@ -210,6 +265,11 @@ internal sealed class AddonProbeTools : IDisposable
             Volatile.Write(ref sampling, 0);
         }
     }
+
+    private static ScreenNode Screen(JObject node) => new(
+        node.Value<float>("screenX"), node.Value<float>("width"), node["transform"]?.Value<float>("m11") ?? 0,
+        node["transform"]?.Value<float>("m12") ?? 0, node["transform"]?.Value<float>("m21") ?? 0,
+        node.Value<bool>("available") && node.Value<bool>("visible"));
 
     public void Dispose() => lifetime.Cancel();
 }

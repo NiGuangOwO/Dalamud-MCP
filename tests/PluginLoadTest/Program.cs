@@ -422,6 +422,16 @@ internal static class Program
             Check("addon sampler rejects an empty node selection before subscribing",
                 sampleError && samplePayload?.Contains("nodeIds", StringComparison.Ordinal) == true,
                 FirstLine(samplePayload ?? sampleText));
+            var invalidFraction = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":106,\"method\":\"tools/call\",\"params\":{\"name\":\"click_addon_when_node_matches\",\"arguments\":{\"addon\":\"BasketBall\",\"observeNodeId\":14,\"clickNodeId\":10,\"targetNodeId\":18,\"targetFraction\":0}}}").ConfigureAwait(false);
+            var (fractionPayload, fractionError) = UnwrapToolResult(invalidFraction);
+            Check("screen match rejects an empty target window before subscribing",
+                fractionError && fractionPayload?.Contains("targetFraction", StringComparison.Ordinal) == true);
+            var invalidGuard = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":107,\"method\":\"tools/call\",\"params\":{\"name\":\"click_addon_when_node_matches\",\"arguments\":{\"addon\":\"BasketBall\",\"observeNodeId\":14,\"clickNodeId\":10,\"targetNodeId\":18,\"guardValueIndex\":0}}}").ConfigureAwait(false);
+            var (guardPayload, guardError) = UnwrapToolResult(invalidGuard);
+            Check("screen match rejects an incomplete phase guard before subscribing",
+                guardError && guardPayload?.Contains("guardValueIndex", StringComparison.Ordinal) == true);
             Check("get_module_info returned its section map",
                 modulePayload is not null && modulePayload.Contains("\"sections\"", StringComparison.Ordinal),
                 FirstLine(modulePayload ?? moduleText));

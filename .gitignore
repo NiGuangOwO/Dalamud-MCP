@@ -13,3 +13,5 @@
 /tests/PluginLoadTest/obj
 /tests/ProtocolSmokeTest/bin
 /tests/ProtocolSmokeTest/obj
+/tests/AddonGeometryTest/bin
+/tests/AddonGeometryTest/obj
