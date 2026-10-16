@@ -35,7 +35,7 @@ internal sealed class AddonProbeTools : IDisposable
             "Collects frame-aligned snapshots without blocking the game. One sampler at a time, 600 frames maximum, 20 second timeout. Stops if the addon closes or changes identity; unload cancels and removes the listener.",
             traceSchema, args => Sample(args));
         registry.AddAsync("click_addon_when_node_matches", "Click once when a node reaches a width range",
-            "Observes an addon on each framework frame and dispatches one UI event when the observed node enters a width range, or its screen-space right edge aligns with the center of targetNodeId. Screen matching uses native transforms and rejects rotated/reflected geometry. The clicked control must be visible and enabled. Optional integer addon-value guard is checked in the same frame. Bounded to 600 frames / 20 seconds; addon replacement and disabling mutating tools cancel the request.",
+            "Observes each framework frame and dispatches one UI event on a width range or transformed node alignment. Default right-edge/center matching preserves gauge behavior; matchAxis x/y compares configurable node anchors for moving controls. Rejects rotated/reflected geometry. The clicked control must be visible and enabled. Integer addon-value guards are checked in the same frame. Bounded to 600 frames / 20 seconds; replacement and disabling mutating tools cancel the request. This tool does not press-and-hold: callers starting movement must handle timeout/stop themselves.",
             Json.Schema(
                 ("addon", "string", "Exact internal addon name.", true),
                 ("observeNodeId", "integer", "Top-level node whose width is observed.", true),
@@ -44,6 +44,9 @@ internal sealed class AddonProbeTools : IDisposable
                 ("maxWidth", "integer", "Inclusive maximum width, 0-65535; required without targetNodeId.", false),
                 ("targetNodeId", "integer", "Optional top-level target marker. Match the observed right edge against its transformed horizontal center.", false),
                 ("targetFraction", "number", "Central fraction of the marker width to accept, greater than 0 and at most 1 (default 0.5). Scales with UI zoom.", false),
+                ("matchAxis", "string", "Screen-space match: rightEdge (default), x or y. x/y compares configurable anchors and requires targetNodeId.", false),
+                ("observeAnchor", "number", "For x/y: fraction along observed node, 0-1 (default 0).", false),
+                ("targetAnchor", "number", "For x/y: fraction along target node, 0-1 (default 0).", false),
                 ("guardValueIndex", "integer", "Optional integer AtkValue index, 0-31; requires guardValue or guardValues.", false),
                 ("guardValue", "integer", "Expected integer AtkValue at guardValueIndex; input is sent only while it matches.", false),
                 ("guardValues", "array of integer", "Alternative to guardValue: 1-16 accepted integer values at guardValueIndex.", false),
@@ -155,6 +158,14 @@ internal sealed class AddonProbeTools : IDisposable
         foreach (var key in new[] { "addon", "observeNodeId", "clickNodeId" })
             if (args[key] is null || args[key]!.Type == JTokenType.Null) throw new ToolException($"{key} is required");
         var marker = args.Value<uint?>("targetNodeId");
+        var axis = args.Value<string>("matchAxis") ?? "rightEdge";
+        if (axis is not ("rightEdge" or "x" or "y") || (axis != "rightEdge" && marker == null))
+            throw new ToolException("matchAxis must be rightEdge, x or y; x/y requires targetNodeId");
+        foreach (var key in new[] { "observeAnchor", "targetAnchor" })
+        {
+            var anchor = args.Value<double?>(key) ?? 0;
+            if (!double.IsFinite(anchor) || anchor is < 0 or > 1) throw new ToolException($"{key} must be 0-1");
+        }
         if (marker == null)
         {
             if (args["minWidth"] == null || args["maxWidth"] == null) throw new ToolException("minWidth/maxWidth or targetNodeId is required");
@@ -231,8 +242,13 @@ internal sealed class AddonProbeTools : IDisposable
                     var observed = nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == args.Value<uint>("observeNodeId"));
                     var target = nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == args.Value<uint>("clickNodeId"));
                     var markerId = args.Value<uint?>("targetNodeId");
-                    var matches = markerId.HasValue
-                        ? NodeScreenMatch.Matches(Screen(observed), Screen(nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == markerId.Value)), args.Value<double?>("targetFraction") ?? 0.5)
+                    var axis = args.Value<string>("matchAxis") ?? "rightEdge";
+                    var marker = markerId.HasValue ? nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == markerId.Value) : null;
+                    var fraction = args.Value<double?>("targetFraction") ?? 0.5;
+                    var matches = marker != null
+                        ? axis == "rightEdge" ? NodeScreenMatch.Matches(Screen(observed), Screen(marker), fraction)
+                            : NodeScreenMatch.AnchorsMatch(Screen(observed, axis == "y"), Screen(marker, axis == "y"), fraction,
+                                args.Value<double?>("observeAnchor") ?? 0, args.Value<double?>("targetAnchor") ?? 0)
                         : observed.Value<int>("width") >= args.Value<int>("minWidth") && observed.Value<int>("width") <= args.Value<int>("maxWidth");
                     var guardIndex = args.Value<int?>("guardValueIndex");
                     var guard = guardIndex.HasValue ? ((JArray)snapshot["values"]!).OfType<JObject>().FirstOrDefault(v => v.Value<int>("index") == guardIndex.Value) : null;
@@ -266,8 +282,8 @@ internal sealed class AddonProbeTools : IDisposable
         }
     }
 
-    private static ScreenNode Screen(JObject node) => new(
-        node.Value<float>("screenX"), node.Value<float>("width"), node["transform"]?.Value<float>("m11") ?? 0,
+    private static ScreenNode Screen(JObject node, bool vertical = false) => new(
+        node.Value<float>(vertical ? "screenY" : "screenX"), node.Value<float>(vertical ? "height" : "width"), node["transform"]?.Value<float>(vertical ? "m22" : "m11") ?? 0,
         node["transform"]?.Value<float>("m12") ?? 0, node["transform"]?.Value<float>("m21") ?? 0,
         node.Value<bool>("available") && node.Value<bool>("visible"));
 

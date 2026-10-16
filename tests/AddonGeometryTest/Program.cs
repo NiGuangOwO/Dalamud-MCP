@@ -16,4 +16,14 @@ Check(!NodeScreenMatch.Matches(Fill(223), marker with { M12 = 1 }, 0.5), "rotate
 Check(!NodeScreenMatch.Matches(Fill(223), marker with { M11 = -1 }, 0.5), "reflected geometry is refused");
 Check(!NodeScreenMatch.Matches(Fill(223), marker with { X = float.NaN }, 0.5), "non-finite geometry is refused");
 Check(!NodeScreenMatch.Matches(Fill(223), marker, 0), "empty target window is refused");
+var cursorX = new ScreenNode(1270, 32, 1, 0, 0, true);
+var ballX = new ScreenNode(1272, 10, 1, 0, 0, true);
+Check(NodeScreenMatch.AnchorsMatch(cursorX, ballX, 0.5, 0, 0), "UfoCatcher observed horizontal release matches origins");
+Check(NodeScreenMatch.AnchorsMatch(new(1099, 28, 1, 0, 0, true), new(1098, 10, 1, 0, 0, true), 0.5, 0, 0), "UfoCatcher observed vertical release matches origins");
+Check(!NodeScreenMatch.AnchorsMatch(cursorX with { X = 1250 }, ballX, 0.5, 0, 0), "distant cursor does not release");
+Check(NodeScreenMatch.AnchorsMatch(new(1905, 32, 1.5f, 0, 0, true), new(1908, 10, 1.5f, 0, 0, true), 0.5, 0, 0), "origin matching preserves UI scale");
+Check(NodeScreenMatch.AnchorsMatch(new(100, 32, 1, 0, 0, true), new(111, 10, 1, 0, 0, true), 0.5, 0.5, 0.5), "explicit centers account for unequal node sizes");
+Check(!NodeScreenMatch.AnchorsMatch(cursorX, ballX, 0.5, double.NaN, 0), "nonfinite anchor refused");
+Check(!NodeScreenMatch.AnchorsMatch(cursorX, ballX, 0.5, 0, 2), "out of range anchor refused");
+Check(!NodeScreenMatch.AnchorsMatch(cursorX, ballX with { Visible = false }, 0.5, 0, 0), "hidden ball refused");
 Console.WriteLine($"{count}/{count} passed");

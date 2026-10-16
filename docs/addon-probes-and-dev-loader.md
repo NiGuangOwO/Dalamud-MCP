@@ -59,3 +59,17 @@ The catalog now contains 107 tools: 66 read-only and 41 mutating. MCP `tools/lis
 ## Loaded addon discovery (Moogle's Paw development)
 
 `list_loaded_addons` enumerates the bounded native AllLoadedUnitsList on the framework thread. It defaults to visible windows and accepts `nameContains` (case-insensitive), `visibleOnly` and `max` (1-256). The response reports totalMatching/truncated and exact names, ids, readiness, node/value counts. This discovered `UfoCatcher` from a real interaction without knowing its internal name. It is read-only and does not extend the open_addon allowlist.
+
+## Position matching on either axis
+
+`click_addon_when_node_matches` now accepts `matchAxis` = `x` or `y` with `targetNodeId`. It compares screen-space node anchors (fractions 0-1, `observeAnchor` and `targetAnchor`, default 0) within `targetFraction` of the target's transformed width or height. The default `rightEdge` mode is unchanged. Native matrices and geometry checks apply on both axes; scalar guards and control visibility/enabled state are evaluated in the same frame.
+
+Moogle's Paw (`UfoCatcher`) uses node 36 as the moving cursor and node 37 as the small target. Nodes 2 and 3 receive ButtonPress (parameters 1/2) to move, followed by ButtonClick with the same parameter to stop each axis. Both playable axes use native state 2; the enabled button distinguishes them. Phase 2 alone is insufficient during the introductory animation: wait for visible AND enabled. An MCP test released at local (137,70) against target (136,71), and the game paid 25 MGP. No score/result callbacks were submitted.
+
+Example after starting horizontal motion with the normal button event:
+
+```json
+{"addon":"UfoCatcher","observeNodeId":36,"clickNodeId":2,"targetNodeId":37,"matchAxis":"x","targetFraction":0.5,"guardValueIndex":0,"guardValue":2,"event":"buttonClick","param":1,"frames":600}
+```
+
+Use axis `y`, clickNodeId 3 and parameter 2 for the vertical control. This is a one-event tool, not an atomic press/hold operation: callers initiating movement must handle timeout and stop. The native minigame also times out; plugin controllers should release their own held control on manual stop/unload, and must never send release to a replacement addon. Geometry tests include the observed coordinates, scale, explicit anchors and invalid inputs.

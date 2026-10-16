@@ -7,6 +7,16 @@ internal readonly record struct ScreenNode(float X, float Width, float M11, floa
 
 internal static class NodeScreenMatch
 {
+    public static bool AnchorsMatch(ScreenNode observed, ScreenNode marker, double fraction, double observedAnchor, double targetAnchor)
+    {
+        if (!double.IsFinite(observedAnchor) || observedAnchor is < 0 or > 1 ||
+            !double.IsFinite(targetAnchor) || targetAnchor is < 0 or > 1 ||
+            !double.IsFinite(fraction) || fraction <= 0 || fraction > 1 || !Valid(observed) || !Valid(marker)) return false;
+        var point = (double)observed.X + observed.Width * observed.M11 * observedAnchor;
+        var target = (double)marker.X + marker.Width * marker.M11 * targetAnchor;
+        return Math.Abs(point - target) <= marker.Width * marker.M11 * fraction / 2;
+    }
+
     public static bool Matches(ScreenNode observed, ScreenNode marker, double fraction)
     {
         if (!double.IsFinite(fraction) || fraction <= 0 || fraction > 1 || !Valid(observed) || !Valid(marker)) return false;
