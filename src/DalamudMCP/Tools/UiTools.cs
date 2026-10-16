@@ -161,6 +161,16 @@ internal static class UiTools
             _ => AddonState());
 
         registry.Add(
+            "list_loaded_addons",
+            "Discover loaded native UI windows",
+            "Lists exact internal names and ids from the native loaded-addon list, including minigames outside the open_addon allowlist. Read-only; use returned names with list_addon_elements or get_addon_node_snapshot. Bounded to the native list capacity.",
+            Json.Schema(
+                ("nameContains", "string", "Optional case-insensitive internal-name substring.", false),
+                ("visibleOnly", "boolean", "Only return visible windows (default true).", false),
+                ("max", "integer", "Maximum results, 1-256 (default 100).", false)),
+            ListLoadedAddons);
+
+        registry.Add(
             "list_addon_elements",
             "List addon (UI window) elements",
             "Walks a loaded addon's UI node tree and reports its clickable elements: node id, " +
@@ -358,6 +368,35 @@ internal static class UiTools
     }
 
     // ---------------------------------------------------------------- handlers
+
+    private static unsafe object ListLoadedAddons(JObject args)
+    {
+        var max = args.Value<int?>("max") ?? 100;
+        if (max is < 1 or > 256) throw new ToolException("max must be 1-256");
+        RaptureAtkUnitManager* manager;
+        try { manager = RaptureAtkUnitManager.Instance(); }
+        catch (InvalidOperationException) { return new JObject { ["available"] = false, ["reason"] = "UI manager unresolved" }; }
+        if (manager == null) return new JObject { ["available"] = false, ["reason"] = "UI manager unavailable" };
+        var filter = args.Value<string>("nameContains") ?? "";
+        var visibleOnly = args.Value<bool?>("visibleOnly") ?? true;
+        var list = &manager->AllLoadedUnitsList;
+        var entries = new JArray();
+        var matching = 0;
+        for (var i = 0; i < Math.Min((int)list->Count, list->Entries.Length); i++)
+        {
+            var unit = list->Entries[i].Value;
+            if (unit == null || (visibleOnly && !unit->IsVisible)) continue;
+            var name = unit->NameString;
+            if (!name.Contains(filter, StringComparison.OrdinalIgnoreCase)) continue;
+            matching++;
+            if (entries.Count >= max) continue;
+            entries.Add(new JObject { ["addon"] = name, ["addonId"] = unit->Id,
+                ["visible"] = unit->IsVisible, ["ready"] = unit->IsReady,
+                ["nodeCount"] = unit->UldManager.NodeListCount, ["valueCount"] = unit->AtkValuesCount });
+        }
+        return new JObject { ["available"] = true, ["count"] = entries.Count,
+            ["totalMatching"] = matching, ["truncated"] = matching > entries.Count, ["addons"] = entries };
+    }
 
     private static unsafe object OpenAddon(JObject args)
     {

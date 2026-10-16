@@ -8,7 +8,7 @@ Dalamud MCP 是一个 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatcor
 目标、FATE、货币、Excel 游戏数据，以及通过
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) 读取的任意经过校验的原始内存。
 
-MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 106 个工具 —— 65 个只读，外加 41 个可变更工具（可选开启），
+MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 107 个工具 —— 66 个只读，外加 41 个可变更工具（可选开启），
 能直接作用于游戏：施放技能、选择目标与移动、发送聊天、管理插件、操控 addon 窗口、注入 Dear ImGui 输入，以及与其他插件注册 IPC 端点。
 后台还有一个事件采集器，把游戏状态变化记入环形缓冲区，Agent 可以轮询变化而不必每回合重读完整状态。
 
@@ -135,7 +135,7 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 
 ## 连接 Agent
 
-新增的逐帧 UI 节点观测、条件点击、组件节点定位、开发插件真实加载与回调探针修复，见 [开发工具说明](docs/addon-probes-and-dev-loader.md)。当前目录共 106 个工具（65 个只读、41 个可变更）；`tools/list` 单页最多 100 个，请继续读取 `nextCursor`。
+新增的逐帧 UI 节点观测、条件点击、组件节点定位、开发插件真实加载与回调探针修复，见 [开发工具说明](docs/addon-probes-and-dev-loader.md)。当前目录共 107 个工具（66 个只读、41 个可变更）；`tools/list` 单页最多 100 个，请继续读取 `nextCursor`。
 
 所有端点都在 `127.0.0.1` 上：
 
@@ -234,7 +234,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-106 个工具：65 个只读，外加 41 个可变更工具（控制、聊天、插件管理、addon 窗口、Dear ImGui 输入注入与 IPC 端点注册），在
+107 个工具：66 个只读，外加 41 个可变更工具（控制、聊天、插件管理、addon 窗口、Dear ImGui 输入注入与 IPC 端点注册），在
 `AllowMutatingTools` 打开前隐藏。名称与 `tools/list` 中完全一致。
 
 ### 客户端与会话
@@ -493,7 +493,7 @@ addon 的 vtable，这正是 `registered` 事件模式与监听器级 probe 存�
 
 ## 安全模型
 
-**默认只读。** 106 个工具中的 65 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 41 个工具
+**默认只读。** 107 个工具中的 66 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 41 个工具
 —— 技能施放、选择目标与移动、聊天、插件管理、addon 窗口控制、Dear ImGui 输入注入与 IPC 端点注册 —— 在 `AllowMutatingTools`
 打开前不可见。
 
@@ -596,7 +596,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 `tests\McpInterop` 用**官方** MCP SDK（`@modelcontextprotocol/sdk`，TypeScript 实现，锁定 `1.30.1`）而非
 手写 JSON-RPC 驱动真实服务器，让组帧由独立实现裁决。官方客户端完成 `initialize`、读回服务器身份、解析
 `tools/list`、往返一次工具调用、把工具错误作为 `isError` 接收而非传输失败，并且之后继续工作。它的第四阶段
-校验全部 106 个**交付** schema：`PluginLoadTest` 在设置了 `DALAMUD_MCP_DUMP_TOOLS` 时导出 `tools/list` 的每一页载荷，
+校验全部 107 个**交付** schema：`PluginLoadTest` 在设置了 `DALAMUD_MCP_DUMP_TOOLS` 时导出 `tools/list` 的每一页载荷，
 该载荷经过 SDK 声明的 `ToolSchema`，再用 SDK 内置的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译。
 
 有两处发现值得记录，因为二者都是"检查在被加强之前并不能说明什么"的例子：
@@ -667,7 +667,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 
 内存工具在这里也是对**真实内存**验证的。`MemoryProbe` 通过 `ReadProcessMemory(GetCurrentProcess(), ...)`
 读取当前进程，而加载测试在自己的进程内承载插件，所以它可以钉入一个已知字节模式并断言工具原样返回这些字节。
-安全防护通过读取地址 `0x1` 并要求得到一句有措辞的拒绝来检查。全部 106 个交付工具的 schema 都通过真实 socket
+安全防护通过读取地址 `0x1` 并要求得到一句有措辞的拒绝来检查。全部 107 个交付工具的 schema 都通过真实 socket
 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型 `properties` 的 JSON 对象，每个属性必须携带
 JSON Schema 七个合法名之一的 `type`，每个 `array` 必须说明其 `items`，`required` 里的每个名字都必须真的被
 声明。同一段落还把 schema 与行为交叉核对：每个处理器自己的"缺少必需参数：X"消息在扫描期间被捕获，并与

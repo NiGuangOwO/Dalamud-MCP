@@ -54,4 +54,8 @@ The old `probe_callback_enable` decoded the return from `ISigScanner.TryScanText
 
 The probe now takes `AtkUnitBase.MemberFunctionPointers.FireCallback` directly and refuses unresolved, unreadable, guarded or non-executable addresses before entering the hook engine. Offline PluginLoadTest verifies unresolved-pointer rejection; enabling, capturing and unloading the repaired probe were verified in the live client.
 
-The catalog now contains 106 tools: 65 read-only and 41 mutating. MCP `tools/list` is paginated at 100 entries; follow `nextCursor` to retrieve the complete catalog.
+The catalog now contains 107 tools: 66 read-only and 41 mutating. MCP `tools/list` is paginated at 100 entries; follow `nextCursor` to retrieve the complete catalog.
+
+## Loaded addon discovery (Moogle's Paw development)
+
+`list_loaded_addons` enumerates the bounded native AllLoadedUnitsList on the framework thread. It defaults to visible windows and accepts `nameContains` (case-insensitive), `visibleOnly` and `max` (1-256). The response reports totalMatching/truncated and exact names, ids, readiness, node/value counts. This discovered `UfoCatcher` from a real interaction without knowing its internal name. It is read-only and does not extend the open_addon allowlist.
