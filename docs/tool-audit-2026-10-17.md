@@ -33,3 +33,9 @@ call_plugin_ipc was registered as read-only even though supported Action<bool> e
 Arguments no longer silently coerce JSON strings or numbers into booleans/integers. Int32 overflow is refused. Zero-argument Func<bool>/Func<string> signatures used to silently ignore supplied values because EnsureNoArguments was empty; they now reject them before contacting any provider. IpcArgumentTest passes 10/10, and PluginLoadTest passes 105/105 at this stage. Schema metadata accepts only integer/boolean values. No external plugin Action<bool> was fired during the audit.
 
 The apparent primary-stat discrepancy is not an arithmetic defect: documented top-level fields are base stats, while attributes contains actual panel stats with equipment. Tool metadata now explicitly explains this existing distinction; returned values and compatibility are preserved.
+
+## Target and event cursor continuity
+
+A live invalid set_focus_target selector cleared an existing focus and reported success. Only an empty selector now clears focus; a specified but missing target returns an error and leaves the previous focus intact. The before/after scenario was verified with self-focus and the original focus restored afterward.
+
+query_events now returns the documented lastId cursor. events_wait previously returned the newest buffer id even when count truncated delivery; a client consuming one item could skip the remaining backlog. It now advances lastId only to the last delivered item, or retains afterId on an empty timeout. Three queued synthetic events are each delivered through real MCP HTTP calls with count=1 in PluginLoadTest (now 108/108). A live two-item focus-change backlog was also delivered one event per call without skipping. The event collector throttle and temporary data subscription used for auxiliary checks were restored/removed.

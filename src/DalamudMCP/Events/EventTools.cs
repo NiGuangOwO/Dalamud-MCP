@@ -97,7 +97,7 @@ internal static class EventTools
             ["count"] = result.Events.Count,
             ["timedOut"] = result.TimedOut,
             ["afterId"] = afterId,
-            ["lastId"] = hub.Buffer.LastId,
+            ["lastId"] = result.Events.Count > 0 ? result.Events.Max(e => e.Id) : afterId,
             ["events"] = JArray.FromObject(result.Events),
             ["config"] = ConfigJson(collector.Config),
         };
@@ -118,10 +118,12 @@ internal static class EventTools
         long? since = args.TryGetValue("since", out var sinceTok) ? sinceTok.Value<long>() : null;
         long? before = args.TryGetValue("before", out var beforeTok) ? beforeTok.Value<long>() : null;
 
+        var cursor = hub.Buffer.LastId;
         var events = hub.Buffer.Query(typeList, count, since, before);
         return new JObject
         {
             ["count"] = events.Count,
+            ["lastId"] = events.Count > 0 ? Math.Max(cursor, events.Max(e => e.Id)) : cursor,
             ["events"] = JArray.FromObject(events),
             ["config"] = ConfigJson(collector.Config),
         };

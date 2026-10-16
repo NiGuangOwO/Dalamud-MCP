@@ -284,7 +284,7 @@ internal static unsafe class ControlTools
                     o is not null && Conv.Str(o.Name).Contains(name, StringComparison.OrdinalIgnoreCase));
         }
 
-        if (focus && target is null)
+        if (focus && target is null && !args.ContainsKey("targetObjectId") && !args.ContainsKey("targetName"))
         {
             svc.TargetManager.FocusTarget = null;
             return new JObject { ["success"] = true, ["cleared"] = true };

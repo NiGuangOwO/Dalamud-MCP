@@ -444,6 +444,31 @@ internal static class Program
                     disabledError && disabledPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
             }
             finally { Set(config, "AllowMutatingTools", true); }
+            var eventHub = pluginType.GetField("eventHub", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(plugin)!;
+            var eventBuffer = Prop(eventHub, "Buffer")!;
+            var eventRecordType = pluginType.Assembly.GetType("DalamudMCP.Events.EventRecord")!;
+            var recordIds = new List<long>();
+            for (var i = 0; i < 3; i++)
+            {
+                var record = Activator.CreateInstance(eventRecordType)!;
+                Set(record, "Type", "audit_cursor");
+                Set(record, "Timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                eventBuffer.GetType().GetMethod("Add")!.Invoke(eventBuffer, new[] { record });
+                recordIds.Add((long)Prop(record, "Id")!);
+            }
+            long eventCursor = 0;
+            for (var i = 0; i < 3; i++)
+            {
+                var eventReply = await CallAsync(http, baseUrl, sessionId,
+                    JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 120 + i, method = "tools/call",
+                        @params = new { name = "events_wait", arguments = new { afterId = eventCursor, count = 1, timeoutMs = 10, types = new[] { "audit_cursor" } } } })).ConfigureAwait(false);
+                var (eventPayload, eventError) = UnwrapToolResult(eventReply);
+                using var eventJson = JsonDocument.Parse(eventPayload!);
+                var data = eventJson.RootElement;
+                eventCursor = data.GetProperty("lastId").GetInt64();
+                Check($"event cursor delivers backlog item {i + 1} without skipping",
+                    !eventError && eventCursor == recordIds[i] && data.GetProperty("events")[0].GetProperty("Id").GetInt64() == recordIds[i]);
+            }
             Check("get_module_info returned its section map",
                 modulePayload is not null && modulePayload.Contains("\"sections\"", StringComparison.Ordinal),
                 FirstLine(modulePayload ?? moduleText));
