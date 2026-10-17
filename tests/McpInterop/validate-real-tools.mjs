@@ -1,4 +1,4 @@
-// Validates the REAL 102-tool tools/list payload with the OFFICIAL @modelcontextprotocol/sdk
+// Validates the complete REAL tools/list payload with the OFFICIAL @modelcontextprotocol/sdk
 // parser.
 //
 // Why this exists alongside tests\PluginLoadTest's own schema checks: that suite validates the
@@ -44,7 +44,7 @@ check("the dumped payload is a JSON-RPC response", response?.jsonrpc === "2.0", 
 check("the dumped payload carries a result, not an error", response?.error === undefined, firstLine(JSON.stringify(response?.error)));
 
 // THE assertion: the official SDK's own schema for tools/list must accept the payload. If any
-// of the 102 tools has a malformed name, description, or inputSchema, this parse fails and the
+// of the shipped tools has a malformed name, description, or inputSchema, this parse fails and the
 // issues list names the exact path.
 //
 // NOTE ON SCOPE, measured rather than assumed: the SDK's ToolSchema checks that inputSchema is
@@ -56,7 +56,7 @@ check("the dumped payload carries a result, not an error", response?.error === u
 // what actually catches an illegal type name.
 const parsed = ListToolsResultSchema.safeParse(response?.result);
 check(
-  "the official SDK accepts all 102 shipped tool definitions as tools/list output",
+  "the official SDK accepts the complete shipped tool catalog as tools/list output",
   parsed.success,
   parsed.success ? "" : firstLine(JSON.stringify(parsed.error?.issues ?? parsed.error)),
 );
@@ -186,6 +186,19 @@ check(
   resultParsed.success,
   resultParsed.success ? "" : firstLine(JSON.stringify(resultParsed.error?.issues)),
 );
+
+if (process.argv[3]) {
+  const imageResponse = JSON.parse(readFileSync(process.argv[3], "utf8"));
+  const nativeResult = imageResponse.result ?? imageResponse;
+  const nativeParsed = CallToolResultSchema.safeParse(nativeResult);
+  check("the official SDK accepts the actual screenshot image result", nativeParsed.success,
+    nativeParsed.success ? "" : firstLine(JSON.stringify(nativeParsed.error?.issues)));
+  check("the screenshot uses native PNG content without base64 text duplication",
+    nativeResult.content?.some(c => c.type === "image" && c.mimeType === "image/png" && c.data?.startsWith("iVBOR")) &&
+    nativeResult.content?.filter(c => c.type === "text").every(c => !c.text.includes("imageBase64")));
+  check("the official SDK rejects an image block missing its required data",
+    !CallToolResultSchema.safeParse({content: [{type: "image", mimeType: "image/png"}]}).success);
+}
 
 console.log();
 console.log(`${checks - failures}/${checks} real-schema checks passed`);

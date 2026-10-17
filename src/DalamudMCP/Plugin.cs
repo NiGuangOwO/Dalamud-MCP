@@ -45,6 +45,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GameServices services;
     private readonly ToolRegistry registry;
     private readonly AddonProbeTools addonProbe;
+    private readonly ScreenshotTools screenshots;
     private readonly WindowSystem windowSystem = new("DalamudMCP");
     private readonly ConfigWindow configWindow;
     private readonly EventHub eventHub = new();
@@ -80,7 +81,8 @@ public sealed class Plugin : IDalamudPlugin
         IGameInteropProvider interop,
         IBuddyList buddyList,
         IDutyState dutyState,
-        ITextureProvider textureProvider)
+        ITextureProvider textureProvider,
+        ITextureReadbackProvider textureReadbackProvider)
     {
         this.pluginInterface = pluginInterface;
         this.log = log;
@@ -144,7 +146,8 @@ public sealed class Plugin : IDalamudPlugin
         InventoryTools.Register(registry, services);
         BuddyTools.Register(registry, services);
         ControlTools.Register(registry, services);
-        ScreenshotTools.Register(registry, services);
+        screenshots = new ScreenshotTools(registry, services, textureProvider, textureReadbackProvider);
+        GameWindowTools.Register(registry, services);
         TeleportTools.Register(registry, services);
         MovementTools.Register(registry, services);
         ChatTools.Register(registry, services);
@@ -362,6 +365,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        screenshots.Dispose();
         addonProbe.Dispose();
         commandManager.RemoveHandler(CommandName);
 

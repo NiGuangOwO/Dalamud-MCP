@@ -6,6 +6,9 @@ using Newtonsoft.Json.Linq;
 
 namespace DalamudMCP.Mcp;
 
+/// <summary>Explicit opt-in image content, distinct from ordinary tool JSON data.</summary>
+public sealed record McpPngResult(object Metadata, byte[] Png);
+
 /// <summary>Helpers for building MCP JSON payloads.</summary>
 public static class Json
 {
@@ -51,6 +54,15 @@ public static class Json
     /// <summary>Wraps a serialized payload as pretty-printed MCP text content.</summary>
     public static JObject JsonResult(object? payload)
     {
+        if (payload is McpPngResult image)
+        {
+            var result = JsonResult(image.Metadata);
+            ((JArray)result["content"]!).Add(new JObject
+            {
+                ["type"] = "image", ["mimeType"] = "image/png", ["data"] = Convert.ToBase64String(image.Png),
+            });
+            return result;
+        }
         var text = payload is string s ? s : JsonConvert.SerializeObject(payload, new JsonSerializerSettings
         {
             NullValueHandling = NullValueHandling.Ignore,

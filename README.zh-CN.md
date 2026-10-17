@@ -10,12 +10,12 @@ Dalamud MCP 是一个 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatcor
 目标、FATE、货币、Excel 游戏数据，以及通过
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) 读取的任意经过校验的原始内存。
 
-MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 107 个工具 —— 65 个只读，外加 42 个可变更工具（可选开启），
+MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 108 个工具 —— 65 个只读，外加 43 个可变更工具（可选开启），
 能直接作用于游戏：施放技能、选择目标与移动、发送聊天、管理插件、操控 addon 窗口、注入 Dear ImGui 输入，以及与其他插件注册 IPC 端点。
 后台还有一个事件采集器，把游戏状态变化记入环形缓冲区，Agent 可以轮询变化而不必每回合重读完整状态。
 
 > **验证范围。** [2026-10-17 排查记录](docs/tool-audit-2026-10-17.md) 包含 62 个不同工具的现场调用，
-> 其中包括上下文拒绝和空操作，不代表全部 107 个工具的所有行为均已验证。离线套件覆盖协议、传输、加载与 schema；早期验证历史保留在下文。
+> 其中包括上下文拒绝和空操作，不代表全部 108 个工具的所有行为均已验证。离线套件覆盖协议、传输、加载与 schema；早期验证历史保留在下文。
 
 ## 目录
 
@@ -130,7 +130,7 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 闸门在两处强制：可变更工具被从 `tools/list` 过滤掉，即使客户端知道名字，`tools/call` 也会以解释性错误拒绝。
 打开设置还会把标签从 "read-only (recommended)" 换成 "agents may change game state" 警告。
 
-**注意：** 闸门已完整实现并测试，可变更工具都在它之后交付。本文档列出的 42 个工具 —— 技能施放与选择目标、
+**注意：** 闸门已完整实现并测试，可变更工具都在它之后交付。本文档列出的 43 个工具 —— 技能施放与选择目标、
 自动移动、传送、聊天与斜杠命令、插件管理、addon 窗口控制、Dear ImGui 输入注入与 IPC 端点注册 —— 都能作用于游戏。
 全部被标记为可变更，因此在 `AllowMutatingTools` 打开之前，它们在 `tools/list` 中不可见、`tools/call` 会拒绝；
 其余 65 个工具仍然只读。
@@ -139,7 +139,7 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 
 仓库附带 [Dalamud 开发 Skill](.agents/skills/dalamud-development/SKILL.md)，让 Agent 在插件调试、界面分析和游戏内验证时主动选择 MCP 工作流。本仓库的 [AGENTS.md](AGENTS.md) 提供项目入口；[Agent 接入说明](docs/agent-setup.md) 包含 MCP 注册、Skill 发现、安装到其他插件项目及 AGENTS 模板。服务器也会在 MCP 初始化时提供简短开发指引。安装 Skill 与连接 MCP 是两个步骤，自动选择并非强制保证。
 
-新增的逐帧 UI 节点观测、条件点击、组件节点定位、开发插件真实加载与回调探针修复，见 [开发工具说明](docs/addon-probes-and-dev-loader.md)。当前目录共 107 个工具（65 个只读、42 个可变更）；`tools/list` 单页最多 100 个，请继续读取 `nextCursor`。
+新增的逐帧 UI 节点观测、条件点击、组件节点定位、开发插件真实加载与回调探针修复，见 [开发工具说明](docs/addon-probes-and-dev-loader.md)。当前目录共 108 个工具（65 个只读、43 个可变更）；`tools/list` 单页最多 100 个，请继续读取 `nextCursor`。
 
 所有端点都在 `127.0.0.1` 上：
 
@@ -238,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-107 个工具：65 个只读，外加 42 个可变更工具（控制、聊天、插件管理、addon 窗口、Dear ImGui 输入注入与 IPC 端点注册），在
+108 个工具：65 个只读，外加 43 个可变更工具（控制、聊天、插件管理、addon 窗口、Dear ImGui 输入注入与 IPC 端点注册），在
 `AllowMutatingTools` 打开前隐藏。名称与 `tools/list` 中完全一致。
 
 ### 客户端与会话
@@ -486,7 +486,8 @@ addon 的 vtable，这正是 `registered` 事件模式与监听器级 probe 存�
 
 | 工具 | 描述 | 关键参数 |
 | --- | --- | --- |
-| `capture_game_screenshot` | 截取游戏画面为 PNG 并返回 base64 编码。`client` 只抓 3D 场景，`window` 含标题栏与边框。截图取自窗口自身表面，因此客户端可以处于后台。`save=true` 时还会写入插件的 `captures` 目录，下次保存时清理过期文件。 | `area`（枚举：`client`/`window`，默认 `client`）、`save`、`ttlSeconds`（60-86400，默认 600）、`maxDimension`（256-3840，默认 1920） |
+| `capture_game_screenshot` | 默认 `client` 通过 Dalamud 读取游戏渲染目标；最小化后仍渲染时也可截图。不抓取桌面、不自动恢复窗口。可选缓存明确返回年龄，支持原生 MCP 图片及仅返回保存路径。详见[截图说明](docs/screenshots.md)。 | `area`、`maxDimension`、`includeDalamudUi`、`timeoutMs`、`allowCached`、`maxCacheAgeMs`、`save`、`ttlSeconds`、`includeImage`、`imageContent` |
+| `set_game_window_state` | 显式最小化/恢复本进程游戏窗口，并报告观测结果。受变更工具开关控制，无需角色登录；恢复可能激活游戏。 | `state`（必需：`minimize`/`restore`） |
 
 ### 已安装插件
 
@@ -497,7 +498,7 @@ addon 的 vtable，这正是 `registered` 事件模式与监听器级 probe 存�
 
 ## 安全模型
 
-**默认只读。** 107 个工具中的 65 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 42 个工具
+**默认只读。** 108 个工具中的 65 个是只读状态；没有一个写入。可变更闸门被强制，注册在它后面的 43 个工具
 —— 技能施放、选择目标与移动、聊天、插件管理、addon 窗口控制、Dear ImGui 输入注入与 IPC 端点注册 —— 在 `AllowMutatingTools`
 打开前不可见。
 
@@ -600,7 +601,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 `tests\McpInterop` 用**官方** MCP SDK（`@modelcontextprotocol/sdk`，TypeScript 实现，锁定 `1.30.1`）而非
 手写 JSON-RPC 驱动真实服务器，让组帧由独立实现裁决。官方客户端完成 `initialize`、读回服务器身份、解析
 `tools/list`、往返一次工具调用、把工具错误作为 `isError` 接收而非传输失败，并且之后继续工作。它的第四阶段
-校验全部 107 个**交付** schema：`PluginLoadTest` 在设置了 `DALAMUD_MCP_DUMP_TOOLS` 时导出 `tools/list` 的每一页载荷，
+校验全部 108 个**交付** schema：`PluginLoadTest` 在设置了 `DALAMUD_MCP_DUMP_TOOLS` 时导出 `tools/list` 的每一页载荷，
 该载荷经过 SDK 声明的 `ToolSchema`，再用 SDK 内置的 `ajv` 对照 JSON Schema 2020-12 元 schema 编译。
 
 有两处发现值得记录，因为二者都是"检查在被加强之前并不能说明什么"的例子：
@@ -671,7 +672,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-int
 
 内存工具在这里也是对**真实内存**验证的。`MemoryProbe` 通过 `ReadProcessMemory(GetCurrentProcess(), ...)`
 读取当前进程，而加载测试在自己的进程内承载插件，所以它可以钉入一个已知字节模式并断言工具原样返回这些字节。
-安全防护通过读取地址 `0x1` 并要求得到一句有措辞的拒绝来检查。全部 107 个交付工具的 schema 都通过真实 socket
+安全防护通过读取地址 `0x1` 并要求得到一句有措辞的拒绝来检查。全部 108 个交付工具的 schema 都通过真实 socket
 的 `tools/list` 校验：每个 `inputSchema` 必须是带 object 型 `properties` 的 JSON 对象，每个属性必须携带
 JSON Schema 七个合法名之一的 `type`，每个 `array` 必须说明其 `items`，`required` 里的每个名字都必须真的被
 声明。同一段落还把 schema 与行为交叉核对：每个处理器自己的"缺少必需参数：X"消息在扫描期间被捕获，并与
@@ -775,7 +776,7 @@ FFXIVClientStructs 程序集。
   [vnavmesh](https://github.com/awgil/ffxiv_navmesh) 插件已安装并加载；没有它时它们返回有措辞的错误而非
   部分路径。该 IPC 握手尚未在本机针对实时 vnavmesh 构建演练过。
 - `capture_game_screenshot` 把 PNG 以 base64 编码放在 JSON-RPC 结果内返回，因此全分辨率截图是一个很大的
-  响应；`maxDimension`（默认 1920）是控制手段，而 `save=true` 会把文件写入磁盘，供能读路径的 Agent 流水线使用。
+  响应；可使用 `maxDimension` 控制大小。`save=true, includeImage=false` 只返回路径；`imageContent=true` 则返回原生 MCP 图片，避免把 base64 当正文。
 - `get_game_objects` 等枚举工具读取整张对象表后在内存中过滤，常规对象数没问题，但不适合高频轮询循环。
 - `latest.zip` 是普通的插件仓库分发包，不签名、也没有发布到任何地方；`.github\workflows\build.yml` 只把它作为 CI 产物上传。
 - 会话存储把会话保存在内存中，2 小时空闲即过期，长期空闲的客户端必须重新 `initialize`。

@@ -181,6 +181,24 @@ public static class Program
         Check("tool receives arguments and computes",
             addJson["result"]?["content"]?[0]?["text"]?.Value<string>()?.Contains("42") == true);
 
+        // An explicitly typed image result uses native MCP content, without duplicating base64 in text.
+        var tinyPng = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVp0AAAAASUVORK5CYII=");
+        registry.Add("image", "Image", "Test native image content", Json.Schema(),
+            _ => new McpPngResult(new JObject { ["backend"] = "test", ["cached"] = false }, tinyPng));
+        var imageResponse = await Post(http, "/mcp", Request("tools/call", 40, new JObject
+        {
+            ["name"] = "image", ["arguments"] = new JObject(),
+        }), sid);
+        var imageJson = await ReadJson(imageResponse);
+        var imageContent = imageJson["result"]?["content"] as JArray;
+        Check("native image result carries text metadata and an image block", imageContent?.Count == 2 &&
+            imageContent[0]?["type"]?.Value<string>() == "text" && imageContent[1]?["type"]?.Value<string>() == "image");
+        Check("native image bytes and MIME type survive the real HTTP transport",
+            imageContent?[1]?["mimeType"]?.Value<string>() == "image/png" &&
+            imageContent[1]?["data"]?.Value<string>() == Convert.ToBase64String(tinyPng));
+        Check("native image metadata does not duplicate encoded pixels",
+            imageContent?[0]?["text"]?.Value<string>() is { } metadata && metadata.Contains("backend") && !metadata.Contains("iVBOR"));
+
         // --------------------------------------------------- error paths
         var toolError = await Post(http, "/mcp", Request("tools/call", 5, new JObject
         {
@@ -288,7 +306,7 @@ public static class Program
         var listedNow = await Post(http, "/mcp", Request("tools/list", 11, new JObject()), sid);
         var listedNowJson = await ReadJson(listedNow);
         Check("opening the gate reveals the tool in tools/list",
-            ((listedNowJson["result"]?["tools"] as JArray)?.Count ?? 0) == 5);
+            ((listedNowJson["result"]?["tools"] as JArray)?.Count ?? 0) == 6);
 
         gate = false;
 

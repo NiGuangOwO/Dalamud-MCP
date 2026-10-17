@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 107;
+    private const int ExpectedTools = 108;
 
     private static int checks;
     private static int failures;
@@ -127,7 +127,7 @@ internal static class Program
         if (ctors.Length != 1) return 1;
 
         var parameters = ctors[0].GetParameters();
-        Check("constructor takes 24 services", parameters.Length == 24, $"found {parameters.Length}");
+        Check("constructor takes 25 services", parameters.Length == 25, $"found {parameters.Length}");
 
         var nonInterfaces = parameters.Where(p => !p.ParameterType.IsInterface).Select(p => p.ParameterType.Name).ToArray();
         Check("every constructor parameter is an interface", nonInterfaces.Length == 0, string.Join(", ", nonInterfaces));
@@ -290,7 +290,7 @@ internal static class Program
             services[i] = Proxy(type, Handler);
         }
 
-        Check("all 24 services were synthesized", services.All(s => s is not null));
+        Check("all 25 services were synthesized", services.All(s => s is not null));
 
         if (sqpack is null)
         {
@@ -352,6 +352,8 @@ internal static class Program
         Check("registry exposes call_plugin_ipc", toolNames.Contains("call_plugin_ipc"));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
         Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
+        var windowTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_game_window_state"));
+        Check("game window control is classified as mutating", Equals(Prop(windowTool, "Mutating"), true));
         Check("Plugin.ToolCount agrees with the registry", Equals(Prop(plugin, "ToolCount"), toolNames.Count));
 
         // ------------------------------------------------------------- running
@@ -434,6 +436,16 @@ internal static class Program
             var (guardPayload, guardError) = UnwrapToolResult(invalidGuard);
             Check("screen match rejects an incomplete phase guard before subscribing",
                 guardError && guardPayload?.Contains("guardValueIndex", StringComparison.Ordinal) == true);
+            var invalidScreenshot = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":111,\"method\":\"tools/call\",\"params\":{\"name\":\"capture_game_screenshot\",\"arguments\":{\"includeImage\":false}}}").ConfigureAwait(false);
+            var (screenshotPayload, screenshotError) = UnwrapToolResult(invalidScreenshot);
+            Check("path-only screenshot without save is rejected before capture",
+                screenshotError && screenshotPayload?.Contains("save=true", StringComparison.Ordinal) == true);
+            var wrongScreenshotType = await CallAsync(http, baseUrl, sessionId,
+                "{\"jsonrpc\":\"2.0\",\"id\":112,\"method\":\"tools/call\",\"params\":{\"name\":\"capture_game_screenshot\",\"arguments\":{\"allowCached\":\"false\"}}}").ConfigureAwait(false);
+            var (wrongTypePayload, wrongTypeError) = UnwrapToolResult(wrongScreenshotType);
+            Check("screenshot string boolean cannot silently enable cached frames",
+                wrongTypeError && wrongTypePayload?.Contains("JSON boolean", StringComparison.Ordinal) == true);
             Set(config, "AllowMutatingTools", false);
             try
             {
@@ -442,6 +454,11 @@ internal static class Program
                 var (disabledPayload, disabledError) = UnwrapToolResult(disabledIpc);
                 Check("closed mutation gate refuses IPC before endpoint lookup",
                     disabledError && disabledPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
+                var disabledWindow = await CallAsync(http, baseUrl, sessionId,
+                    "{\"jsonrpc\":\"2.0\",\"id\":109,\"method\":\"tools/call\",\"params\":{\"name\":\"set_game_window_state\",\"arguments\":{\"state\":\"minimize\"}}}").ConfigureAwait(false);
+                var (windowPayload, windowError) = UnwrapToolResult(disabledWindow);
+                Check("closed mutation gate refuses window changes before touching HWND",
+                    windowError && windowPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
             }
             finally { Set(config, "AllowMutatingTools", true); }
             var eventHub = pluginType.GetField("eventHub", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(plugin)!;

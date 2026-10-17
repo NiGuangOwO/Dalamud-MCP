@@ -11,13 +11,13 @@ the client itself uses: the object table, the local player, party and alliance, 
 game data, and arbitrary validated raw memory through
 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 
-An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 107 tools — 65 read-only, plus 42 mutating tools
+An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 108 tools — 65 read-only, plus 43 mutating tools
 (opt-in) that can act on the game: cast actions, target and move, send chat, manage plugins, drive addon windows,
 inject Dear ImGui input, and register IPC endpoints with other plugins. A background event collector also records game-state changes into
 a ring buffer that an agent can poll instead of re-reading full state.
 
 > **Verification scope.** The [2026-10-17 audit](docs/tool-audit-2026-10-17.md) observed 62 distinct tools live,
-> including contextual refusals and no-ops; it does not certify every behavior of all 107 tools. Offline suites
+> including contextual refusals and no-ops; it does not certify every behavior of all 108 tools. Offline suites
 > cover protocol, transport, loading and schemas. Earlier verification history remains below.
 
 ## Contents
@@ -143,7 +143,7 @@ installing a plugin. The gate is enforced in two places: mutating tools are filt
 `tools/call` rejects them with an explanatory error even if the client knows the name. Turning the setting on also
 changes the label from "read-only (recommended)" to a warning that "agents may change game state".
 
-**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 42 tools listed in
+**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 43 tools listed in
 this document — action casting and targeting, auto-movement, teleporting, chat and slash commands, plugin
 management, addon-window control, Dear ImGui input injection, and the IPC endpoint registry — can act on the game.
 All of them are flagged mutating, so they stay invisible in `tools/list` and reject `tools/call` until
@@ -153,7 +153,7 @@ All of them are flagged mutating, so they stay invisible in `tools/list` and rej
 
 Install the bundled [Dalamud development skill](.agents/skills/dalamud-development/SKILL.md) so agents can choose the MCP workflow for plugin debugging and in-game validation without an explicit reminder. This repository's [AGENTS.md](AGENTS.md) supplies project routing; [agent setup](docs/agent-setup.md) explains MCP registration, skill discovery, installation in other plugin projects and an AGENTS template. The server also supplies a short workflow in its MCP initialization instructions. Skill installation and MCP connection are separate steps; implicit selection is not guaranteed.
 
-See [addon probes and the verified developer loader](docs/addon-probes-and-dev-loader.md) for frame-aligned node sampling, conditional input, component-scoped node lookup, development-plugin loading, and the callback-probe address fix. The catalog now has 107 tools (65 read-only, 42 mutating); follow `nextCursor` when listing more than 100 tools.
+See [addon probes and the verified developer loader](docs/addon-probes-and-dev-loader.md) for frame-aligned node sampling, conditional input, component-scoped node lookup, development-plugin loading, and the callback-probe address fix. The catalog now has 108 tools (65 read-only, 43 mutating); follow `nextCursor` when listing more than 100 tools.
 
 Endpoints, all on `127.0.0.1`:
 
@@ -259,7 +259,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-107 tools: 65 read-only plus 42 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
+108 tools: 65 read-only plus 43 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
 input injection, and the IPC endpoint registry) that are hidden until `AllowMutatingTools` is on. Names are
 exactly as they appear in `tools/list`.
 
@@ -524,7 +524,8 @@ kinds and both timestamps.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `capture_game_screenshot` | Captures the game as a PNG and returns it base64-encoded. `client` grabs only the 3D scene, `window` includes the title bar and borders. The capture is taken from the window's own surface, so the client may be in the background. With `save=true` the file is also written into the plugin's `captures` folder, and expired files are pruned on the next save. | `area` (enum: `client`/`window`, default `client`), `save`, `ttlSeconds` (60-86400, default 600), `maxDimension` (256-3840, default 1920) |
+| `capture_game_screenshot` | Default `client` reads the game render target through Dalamud, including while minimized if rendering continues. No desktop fallback or automatic restoration. Optional cache is explicitly marked with age; native MCP image output and path-only output are supported. See [screenshot guide](docs/screenshots.md). | `area`, `maxDimension`, `includeDalamudUi`, `timeoutMs`, `allowCached`, `maxCacheAgeMs`, `save`, `ttlSeconds`, `includeImage`, `imageContent` |
+| `set_game_window_state` | Explicitly minimize/restore only this process's game window; reports the observed state. Mutating-gated, works without login, restoration may activate the game. | `state` (`minimize`/`restore`, required) |
 
 ### Installed plugins
 
@@ -535,7 +536,7 @@ kinds and both timestamps.
 
 ## Safety model
 
-**Read-only by default.** 65 of the 107 tools read state; none writes it. The mutating gate is enforced, and the 42
+**Read-only by default.** 65 of the 108 tools read state; none writes it. The mutating gate is enforced, and the 43
 tools registered behind it — action casting, targeting and movement, chat, plugin management, addon-window control,
 Dear ImGui input injection and the IPC endpoint registry — stay invisible until `AllowMutatingTools` is turned on.
 
@@ -862,7 +863,7 @@ Not verified, and therefore not claimed:
   build here.
 - `capture_game_screenshot` returns the PNG base64-encoded inside the JSON-RPC result, so a full-resolution capture
   is a large response; `maxDimension` (default 1920) is the control for that, and `save=true` writes the file to
-  disk instead for agent pipelines that can read a path.
+  disk too; combine it with `includeImage=false` for a path-only response. `imageContent=true` returns native MCP image content instead of base64 text.
 - `get_game_objects` and similar enumeration tools read the whole object table and filter in memory, which is fine
   at normal object counts but not designed for tight polling loops.
 - `latest.zip` is a plain plugin-repository package and is not signed or published anywhere; `.github\workflows\build.yml` only uploads it as a CI artifact.
