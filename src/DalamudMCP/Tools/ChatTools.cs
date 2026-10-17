@@ -22,7 +22,7 @@ internal static unsafe class ChatTools
             "send_chat",
             "Send chat",
             "Sends a chat message through the chat box. Channels: say, yell, shout, party, alliance, " +
-            "fc, tell (requires target), echo. Messages over 500 UTF-8 bytes are refused.",
+            "fc, tell (requires target), echo. Leading-slash text is refused: use slash_command for commands. Messages over 500 UTF-8 bytes are refused.",
             Json.Schema(
                 ("message", "string", "Message body", true),
                 ("channel", "string", "say/yell/shout/party/alliance/fc/tell/echo (default say)", false),
@@ -105,6 +105,7 @@ internal static unsafe class ChatTools
         var message = args.Value<string>("message") ?? string.Empty;
         if (message.Length == 0)
             throw new ToolException("message is required");
+        ValidateChatBody(message);
 
         var channel = (args.Value<string?>("channel") ?? "say").ToLowerInvariant();
         var target = args.Value<string?>("target")?.Trim() ?? string.Empty;
@@ -136,6 +137,14 @@ internal static unsafe class ChatTools
             ["channel"] = channel,
             ["message"] = message,
         };
+    }
+
+    internal static void ValidateChatBody(string message)
+    {
+        if (message.TrimStart().StartsWith('/'))
+            throw new ToolException("send_chat refuses leading-slash text to prevent broadcasting commands; use slash_command instead");
+        if (message.Contains('\r') || message.Contains('\n') || message.Contains('\0'))
+            throw new ToolException("message must not contain line breaks or NUL");
     }
 
     private static JObject ManagePlugin(GameServices svc, JObject args)
