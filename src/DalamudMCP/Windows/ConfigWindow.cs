@@ -2,7 +2,9 @@ using System;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
+using Dalamud.Plugin.Services;
 
 namespace DalamudMCP.Windows;
 
@@ -19,11 +21,13 @@ public sealed class ConfigWindow : Window
     private static readonly Vector4 WarnColor = new(0.95f, 0.75f, 0.35f, 1.0f);
 
     private readonly Plugin plugin;
+    private readonly ITextureProvider textureProvider;
 
-    public ConfigWindow(Plugin plugin)
+    public ConfigWindow(Plugin plugin, ITextureProvider textureProvider)
         : base(Localization.T("ui.title"))
     {
         this.plugin = plugin;
+        this.textureProvider = textureProvider;
 
         Size = new Vector2(620, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -39,7 +43,7 @@ public sealed class ConfigWindow : Window
         var config = plugin.Config;
         var needsRestart = false;
 
-        DrawStatus();
+        DrawHeader();
 
         ImGui.Separator();
         ImGui.Spacing();
@@ -254,6 +258,23 @@ public sealed class ConfigWindow : Window
     private void Persist()
     {
         if (ImGui.IsItemDeactivatedAfterEdit()) plugin.SaveConfig();
+    }
+
+    private void DrawHeader()
+    {
+        // Shared textures are owned by Dalamud; never retain/dispose a frame's wrap.
+        var icon = textureProvider.GetFromManifestResource(typeof(Plugin).Assembly, "DalamudMCP.icon.png")
+            .GetWrapOrDefault();
+        if (icon is not null)
+        {
+            ImGui.Image(icon.Handle, new Vector2(56f * ImGuiHelpers.GlobalScale));
+            ImGui.SameLine();
+        }
+
+        ImGui.BeginGroup();
+        ImGui.TextUnformatted("Dalamud MCP");
+        DrawStatus();
+        ImGui.EndGroup();
     }
 
     private void DrawStatus()

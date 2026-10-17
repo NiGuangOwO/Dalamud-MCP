@@ -127,7 +127,7 @@ internal static class Program
         if (ctors.Length != 1) return 1;
 
         var parameters = ctors[0].GetParameters();
-        Check("constructor takes 23 services", parameters.Length == 23, $"found {parameters.Length}");
+        Check("constructor takes 24 services", parameters.Length == 24, $"found {parameters.Length}");
 
         var nonInterfaces = parameters.Where(p => !p.ParameterType.IsInterface).Select(p => p.ParameterType.Name).ToArray();
         Check("every constructor parameter is an interface", nonInterfaces.Length == 0, string.Join(", ", nonInterfaces));
@@ -290,7 +290,7 @@ internal static class Program
             services[i] = Proxy(type, Handler);
         }
 
-        Check("all 23 services were synthesized", services.All(s => s is not null));
+        Check("all 24 services were synthesized", services.All(s => s is not null));
 
         if (sqpack is null)
         {

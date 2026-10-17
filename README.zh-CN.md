@@ -1,5 +1,7 @@
 # Dalamud MCP
 
+<img src="src/DalamudMCP/images/icon.png" width="96" height="96" alt="Dalamud MCP 水晶与连接节点标志" />
+
 [English](README.md) | 简体中文
 
 Dalamud MCP 是一个 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatcorp/Dalamud) 插件，在回环端口上承载

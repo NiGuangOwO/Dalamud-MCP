@@ -79,7 +79,8 @@ public sealed class Plugin : IDalamudPlugin
         ISigScanner sigScanner,
         IGameInteropProvider interop,
         IBuddyList buddyList,
-        IDutyState dutyState)
+        IDutyState dutyState,
+        ITextureProvider textureProvider)
     {
         this.pluginInterface = pluginInterface;
         this.log = log;
@@ -155,7 +156,7 @@ public sealed class Plugin : IDalamudPlugin
         ChatLogTools.Register(registry, chatLogHub);
         CallbackProbe.Initialize(interop, sigScanner);
 
-        configWindow = new ConfigWindow(this);
+        configWindow = new ConfigWindow(this, textureProvider);
         windowSystem.AddWindow(configWindow);
 
         pluginInterface.UiBuilder.Draw += windowSystem.Draw;

@@ -1,5 +1,7 @@
 # Dalamud MCP
 
+<img src="src/DalamudMCP/images/icon.png" width="96" height="96" alt="Dalamud MCP crystal and connection emblem" />
+
 English | [简体中文](README.zh-CN.md)
 
 Dalamud MCP is a [Dalamud](https://github.com/goatcorp/Dalamud) plugin for FINAL FANTASY XIV that hosts a

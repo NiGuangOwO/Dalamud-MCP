@@ -15,6 +15,7 @@
     <Punchline>Expose FFXIV game memory to AI agents over MCP.</Punchline>
     <Description>Hosts a Model Context Protocol (MCP) server on a local port so that agents can read FINAL FANTASY XIV game memory via Dalamud and FFXIVClientStructs.</Description>
     <RepoUrl>https://github.com/NiGuangOwO/Dalamud-MCP</RepoUrl>
+    <IconUrl>https://raw.githubusercontent.com/NiGuangOwO/Dalamud-MCP/main/src/DalamudMCP/images/icon.png</IconUrl>
     <Tags>mcp;agent;memory;api</Tags>
     <ApplicableVersion>any</ApplicableVersion>
     <DalamudApiLevel>15</DalamudApiLevel>
@@ -30,5 +31,12 @@
     <!-- Keep the historical output layout; tests and the READMEs point at it. -->
     <OutputPath>bin\x64\$(Configuration)\</OutputPath>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Local dev-plugin icon; Packager also publishes images beside latest.zip. -->
+    <Content Include="images\icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Settings branding does not depend on an HTTP request or an external file. -->
+    <EmbeddedResource Include="images\icon.png" LogicalName="DalamudMCP.icon.png" />
+  </ItemGroup>
 
 </Project>
