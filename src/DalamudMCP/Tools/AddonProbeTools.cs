@@ -36,7 +36,7 @@ internal sealed class AddonProbeTools : IDisposable
             "Collects frame-aligned snapshots without blocking the game. One sampler at a time, 600 frames maximum, 20 second timeout. Stops if the addon closes or changes identity; unload cancels and removes the listener.",
             traceSchema, args => Sample(args));
         registry.AddAsync("click_addon_when_node_matches", "Click once when a node reaches a width range",
-            "Observes each framework frame and dispatches one UI event on a width range or transformed node alignment. Default right-edge/center matching preserves gauge behavior; matchAxis x/y compares configurable node anchors for moving controls. Rejects rotated/reflected geometry. The clicked control must be visible and enabled. Integer addon-value guards are checked in the same frame. Bounded to 600 frames / 20 seconds; replacement and disabling mutating tools cancel the request. This tool does not press-and-hold: callers starting movement must handle timeout/stop themselves.",
+            "Observes each framework frame and dispatches one UI event on a width range, transformed node alignment, or local rotation range. Default right-edge/center matching preserves gauge behavior; matchAxis x/y compares configurable node anchors for moving controls. Position matching rejects rotated/reflected geometry; rotation matching uses explicit local radians without wraparound. The clicked control must be visible and enabled. Integer addon-value guards are checked in the same frame. Bounded to 600 frames / 20 seconds; replacement and disabling mutating tools cancel the request. This tool does not press-and-hold: callers starting movement must handle timeout/stop themselves.",
             Json.Schema(
                 ("addon", "string", "Exact internal addon name.", true),
                 ("observeNodeId", "integer", "Top-level node whose width is observed.", true),
@@ -45,7 +45,9 @@ internal sealed class AddonProbeTools : IDisposable
                 ("maxWidth", "integer", "Inclusive maximum width, 0-65535; required without targetNodeId.", false),
                 ("targetNodeId", "integer", "Optional top-level target marker. Match the observed right edge against its transformed horizontal center.", false),
                 ("targetFraction", "number", "Central fraction of the marker width to accept, greater than 0 and at most 1 (default 0.5). Scales with UI zoom.", false),
-                ("matchAxis", "string", "Screen-space match: rightEdge (default), x or y. x/y compares configurable anchors and requires targetNodeId.", false),
+                ("matchAxis", "string", "Match rightEdge (default), x, y, or rotation. x/y requires targetNodeId; rotation uses local radians and minRotation/maxRotation instead of width/target matching.", false),
+                ("minRotation", "number", "For rotation: inclusive minimum local angle in radians, -pi to pi. No wraparound.", false),
+                ("maxRotation", "number", "For rotation: inclusive maximum local angle in radians, -pi to pi. No wraparound.", false),
                 ("observeAnchor", "number", "For x/y: fraction along observed node, 0-1 (default 0).", false),
                 ("targetAnchor", "number", "For x/y: fraction along target node, 0-1 (default 0).", false),
                 ("guardValueIndex", "integer", "Optional integer AtkValue index, 0-31; requires guardValue or guardValues.", false),
@@ -160,21 +162,31 @@ internal sealed class AddonProbeTools : IDisposable
             if (args[key] is null || args[key]!.Type == JTokenType.Null) throw new ToolException($"{key} is required");
         var marker = args.Value<uint?>("targetNodeId");
         var axis = args.Value<string>("matchAxis") ?? "rightEdge";
-        if (axis is not ("rightEdge" or "x" or "y") || (axis != "rightEdge" && marker == null))
-            throw new ToolException("matchAxis must be rightEdge, x or y; x/y requires targetNodeId");
+        if (axis is not ("rightEdge" or "x" or "y" or "rotation") || (axis is "x" or "y" && marker == null))
+            throw new ToolException("matchAxis must be rightEdge, x, y or rotation; x/y requires targetNodeId");
+        if (axis == "rotation")
+        {
+            if (marker != null || args["minWidth"] != null || args["maxWidth"] != null ||
+                args["minRotation"]?.Type is not (JTokenType.Float or JTokenType.Integer) ||
+                args["maxRotation"]?.Type is not (JTokenType.Float or JTokenType.Integer) ||
+                !NodeScreenMatch.RotationMatches(args.Value<double>("minRotation"), args.Value<double>("minRotation"), args.Value<double>("maxRotation")))
+                throw new ToolException("rotation requires only minRotation/maxRotation in [-pi, pi], minimum <= maximum; targetNodeId and widths are incompatible");
+        }
+        else if (args["minRotation"] != null || args["maxRotation"] != null)
+            throw new ToolException("minRotation/maxRotation requires matchAxis=rotation");
         foreach (var key in new[] { "observeAnchor", "targetAnchor" })
         {
             var anchor = args.Value<double?>(key) ?? 0;
             if (!double.IsFinite(anchor) || anchor is < 0 or > 1) throw new ToolException($"{key} must be 0-1");
         }
-        if (marker == null)
+        if (axis != "rotation" && marker == null)
         {
             if (args["minWidth"] == null || args["maxWidth"] == null) throw new ToolException("minWidth/maxWidth or targetNodeId is required");
             var min = args.Value<int>("minWidth");
             var max = args.Value<int>("maxWidth");
             if (min < 0 || max > ushort.MaxValue || min > max) throw new ToolException("invalid width range");
         }
-        else
+        else if (marker != null)
         {
             var fraction = args.Value<double?>("targetFraction") ?? 0.5;
             if (!double.IsFinite(fraction) || fraction <= 0 || fraction > 1) throw new ToolException("targetFraction must be greater than 0 and at most 1");
@@ -246,7 +258,9 @@ internal sealed class AddonProbeTools : IDisposable
                     var axis = args.Value<string>("matchAxis") ?? "rightEdge";
                     var marker = markerId.HasValue ? nodes.OfType<JObject>().First(n => n.Value<uint>("nodeId") == markerId.Value) : null;
                     var fraction = args.Value<double?>("targetFraction") ?? 0.5;
-                    var matches = marker != null
+                    var matches = axis == "rotation"
+                        ? observed["rotation"] != null && NodeScreenMatch.RotationMatches(observed.Value<double>("rotation"), args.Value<double>("minRotation"), args.Value<double>("maxRotation"))
+                        : marker != null
                         ? axis == "rightEdge" ? NodeScreenMatch.Matches(Screen(observed), Screen(marker), fraction)
                             : NodeScreenMatch.AnchorsMatch(Screen(observed, axis == "y"), Screen(marker, axis == "y"), fraction,
                                 args.Value<double?>("observeAnchor") ?? 0, args.Value<double?>("targetAnchor") ?? 0)

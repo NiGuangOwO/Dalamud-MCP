@@ -26,4 +26,10 @@ Check(NodeScreenMatch.AnchorsMatch(new(100, 32, 1, 0, 0, true), new(111, 10, 1, 
 Check(!NodeScreenMatch.AnchorsMatch(cursorX, ballX, 0.5, double.NaN, 0), "nonfinite anchor refused");
 Check(!NodeScreenMatch.AnchorsMatch(cursorX, ballX, 0.5, 0, 2), "out of range anchor refused");
 Check(!NodeScreenMatch.AnchorsMatch(cursorX, ballX with { Visible = false }, 0.5, 0, 0), "hidden ball refused");
+Check(NodeScreenMatch.RotationMatches(0.2, 0.19, 0.21), "local rotating indicator matches radians");
+Check(!NodeScreenMatch.RotationMatches(0.3, 0.19, 0.21), "outside angle refused");
+Check(!NodeScreenMatch.RotationMatches(double.NaN, -1, 1), "nonfinite angle refused");
+Check(!NodeScreenMatch.RotationMatches(0, 1, -1), "reversed range refused");
+Check(!NodeScreenMatch.RotationMatches(0, -4, 1), "range outside normalized radians refused");
+Check(NodeScreenMatch.RotationMatches(-Math.PI, -Math.PI, Math.PI), "inclusive rotation boundary accepted");
 Console.WriteLine($"{count}/{count} passed");

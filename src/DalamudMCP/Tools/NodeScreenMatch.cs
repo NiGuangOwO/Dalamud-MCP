@@ -7,6 +7,10 @@ internal readonly record struct ScreenNode(float X, float Width, float M11, floa
 
 internal static class NodeScreenMatch
 {
+    public static bool RotationMatches(double radians, double minimum, double maximum) =>
+        double.IsFinite(radians) && double.IsFinite(minimum) && double.IsFinite(maximum) &&
+        minimum >= -Math.PI && maximum <= Math.PI && minimum <= maximum && radians >= minimum && radians <= maximum;
+
     public static bool AnchorsMatch(ScreenNode observed, ScreenNode marker, double fraction, double observedAnchor, double targetAnchor)
     {
         if (!double.IsFinite(observedAnchor) || observedAnchor is < 0 or > 1 ||
