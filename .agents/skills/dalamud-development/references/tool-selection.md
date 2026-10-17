@@ -2,6 +2,8 @@
 
 For `SelectString`, prefer `select_addon_menu_item` by label and inspect `dryRun` first. Its `indexKind=menuOrdinal` is a zero-based popup entry index, not the label's `AtkValue` index. Other addon layouts retain legacy callback behavior and need an independently established contract; a text-field index alone is insufficient. See [menu-selection.md](../../../../docs/menu-selection.md).
 
+String-keyed IPC queries support `Func<string, bool>`, `Func<string, bool?>` and `Func<string, string>` with a strict bounded JSON string `value`. Preserve a nullable result as unknown. Check competing automation through its provider contract before attributing a live result to the plugin under test; querying does not authorize changing the provider's configuration.
+
 Use the connected schemas for exact arguments, limits and defaults. This is a routing guide, not a complete tool catalog. Server aliases and tool namespace prefixes may differ between clients.
 
 | Question | Useful tools and interpretation |

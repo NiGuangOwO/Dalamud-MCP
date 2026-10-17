@@ -22,6 +22,9 @@ public static class PluginIpcInvoker
             IpcSignatures.FuncIntString => InvokeFuncIntString(pi, endpoint, argumentJson),
             IpcSignatures.ActionBool => InvokeActionBool(pi, endpoint, argumentJson),
             IpcSignatures.FuncBoolString => InvokeFuncBoolString(pi, endpoint, argumentJson),
+            IpcSignatures.FuncStringBool => InvokeStringQuery<bool>(pi, endpoint, argumentJson),
+            IpcSignatures.FuncStringNullableBool => InvokeStringQuery<bool?>(pi, endpoint, argumentJson),
+            IpcSignatures.FuncStringString => InvokeStringQuery<string>(pi, endpoint, argumentJson),
             _ => throw new ArgumentException($"unsupported signature '{endpoint.Signature}'"),
         };
     }
@@ -62,6 +65,13 @@ public static class PluginIpcInvoker
         return new { invoked = true, result = channel.InvokeFunc(value) };
     }
 
+    private static object InvokeStringQuery<T>(IDalamudPluginInterface pi, IpcEndpoint endpoint, string? argumentJson)
+    {
+        var value = ReadValue<string>(endpoint, argumentJson);
+        var channel = pi.GetIpcSubscriber<string, T>($"{endpoint.PluginName}.{endpoint.MethodName}");
+        return new { invoked = true, result = channel.InvokeFunc(value) };
+    }
+
     private static void EnsureNoArguments(IpcEndpoint endpoint, string? argumentJson)
     {
         // Zero-argument signatures have nowhere to put a value; silently ignoring one
@@ -77,8 +87,11 @@ public static class PluginIpcInvoker
         {
             var token = JToken.Parse(argumentJson);
             if ((typeof(T) == typeof(bool) && token.Type != JTokenType.Boolean) ||
-                (typeof(T) == typeof(int) && token.Type != JTokenType.Integer))
+                (typeof(T) == typeof(int) && token.Type != JTokenType.Integer) ||
+                (typeof(T) == typeof(string) && token.Type != JTokenType.String))
                 throw new ArgumentException($"arguments.value must be a JSON {typeof(T).Name}, without coercion");
+            if (typeof(T) == typeof(string) && token.Value<string>()!.Length > 4096)
+                throw new ArgumentException("arguments.value string exceeds 4096 characters");
             if (typeof(T) == typeof(int) && (token.Value<long>() < int.MinValue || token.Value<long>() > int.MaxValue))
                 throw new ArgumentException("arguments.value is outside Int32 range");
             var value = token.ToObject<T>();

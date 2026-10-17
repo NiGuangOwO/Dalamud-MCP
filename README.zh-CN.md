@@ -414,8 +414,8 @@ FFXIVClientStructs 静态地址解析器尚未初始化时，相关工具返回�
 | 工具 | 描述 | 关键参数 |
 | --- | --- | --- |
 | `query_push_data` | 读取其他插件推送到本插件 `PushData` 通道的条目（2000 条环形缓冲区），按从新到旧顺序，可按 key 过滤。 | `key`、`count`（默认 50） |
-| `register_ipc_endpoint` | 声明另一个插件暴露了可调用端点，持久化到配置中、跨重启保留。 | `pluginName`、`methodName`、`signature`（必需：`Func<bool>`、`Func<string>`、`Func<int, string>`、`Action<bool>`、`Func<bool, string>`）、`description` |
-| `call_plugin_ipc` | 调用已注册端点，受可变更权限控制。`Func<bool>` 和 `Func<string>` 不接收参数；其他签名要求整数或布尔类型的 `value`，不执行类型强制转换。未注册端点会被拒绝。 | `pluginName`、`methodName`、`value` |
+| `register_ipc_endpoint` | 声明另一个插件暴露了可调用端点，持久化到配置中、跨重启保留。 | `pluginName`、`methodName`、`signature`（必需：`Func<bool>`、`Func<string>`、`Func<int, string>`、`Action<bool>`、`Func<bool, string>`、`Func<string, bool>`、`Func<string, bool?>`、`Func<string, string>`）、`description` |
+| `call_plugin_ipc` | 调用已注册端点，受可变更权限控制。`Func<bool>` 和 `Func<string>` 不接收参数；单参数签名要求与声明类型一致的整数、布尔值或有界字符串 `value`，不执行类型强制转换。未注册端点会被拒绝。 | `pluginName`、`methodName`、`value` |
 | `list_ipc_endpoints` | 已注册的端点，可按插件过滤。 | `pluginName` |
 | `plugin_data_subscribe` | 按 key 保留其他插件通过推送通道发来的载荷，写入专用队列供 `plugin_data_poll` 增量排空。无订阅期间到达的载荷只能通过 `query_push_data` 看到，并在环形缓冲区覆盖后丢弃。 | `key`（必需）、`capacity`（16-10000，默认 1000） |
 | `plugin_data_poll` | 排空某个已订阅 key 保留的载荷，按从旧到新顺序。被排空的条目会移除，因此每个载荷仅投递一次；其余留待下次轮询。队列为空时报告 `no_data`。 | `key`（必需）、`maxItems`（1-10000，默认 200） |

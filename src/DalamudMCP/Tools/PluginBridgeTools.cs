@@ -9,8 +9,8 @@ namespace DalamudMCP.Tools;
 
 /// <summary>
 /// Bridges other plugins into MCP: declared endpoints can be invoked, and payloads
-/// pushed over IPC can be drained. register_ipc_endpoint is the only mutating tool
-/// here; the rest only read.
+/// pushed over IPC can be drained. Endpoint registration and invocation are
+/// mutating-gated; the provider determines the invoked function's side effects.
 /// </summary>
 internal static class PluginBridgeTools
 {
@@ -30,7 +30,7 @@ internal static class PluginBridgeTools
             "register_ipc_endpoint",
             "Register IPC endpoint",
             "Declares that another plugin exposes an IPC method MCP may call. " +
-            "Supported signatures: Func<bool>, Func<string>, Func<int, string>, Action<bool>, Func<bool, string>. " +
+            "Supported signatures are listed in the signature enum, including bounded single-string queries. " +
             "Declaring the endpoint does not contact the other plugin; call_plugin_ipc does.",
             Json.SchemaWithEnum(
                 "signature",
@@ -48,12 +48,13 @@ internal static class PluginBridgeTools
             "Call plugin IPC",
             "Invokes a previously registered endpoint. Signatures Func<bool> and Func<string> take no " +
             "argument; Func<int, string> expects arguments.value to be an integer; Action<bool> and " +
-            "Func<bool, string> expect arguments.value to be a boolean. All IPC invocation requires " +
+            "Func<bool, string> expect arguments.value to be a boolean. Func<string, bool>, Func<string, bool?> " +
+            "and Func<string, string> require a JSON string of at most 4096 characters. All IPC invocation requires " +
             "AllowMutatingTools because a declared function can also change game/plugin state. Argument coercion is refused.",
             Json.Schema(
                 ("pluginName", "string", "InternalName of the target plugin", true),
                 ("methodName", "string", "Registered IPC method name", true),
-                ("value", "integer or boolean", "Exact JSON argument for single-argument signatures; omit for zero-argument signatures", false)),
+                ("value", "integer or boolean or string", "Exact JSON argument for single-argument signatures; strings are limited to 4096 characters; omit for zero-argument signatures", false)),
             args => CallEndpoint(svc, hub, args), mutating: true);
 
         registry.Add(

@@ -28,10 +28,14 @@ public static class IpcSignatures
     public const string FuncIntString = "Func<int, string>";
     public const string ActionBool = "Action<bool>";
     public const string FuncBoolString = "Func<bool, string>";
+    public const string FuncStringBool = "Func<string, bool>";
+    public const string FuncStringNullableBool = "Func<string, bool?>";
+    public const string FuncStringString = "Func<string, string>";
 
     public static readonly string[] Supported =
     {
         FuncBool, FuncString, FuncIntString, ActionBool, FuncBoolString,
+        FuncStringBool, FuncStringNullableBool, FuncStringString,
     };
 
     public static bool IsSupported(string signature) =>

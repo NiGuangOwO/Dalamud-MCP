@@ -18,6 +18,15 @@ Check(Equals(Read<int>("42"),42),"native JSON integer accepted");
 Check(Refused(()=>Read<int>("\"42\"")),"string integer cannot silently coerce");
 Check(Refused(()=>Read<int>("4.2")),"float cannot silently truncate");
 Check(Refused(()=>Read<int>("2147483648")),"Int32 overflow refused");
+Check(Equals(Read<string>("\"AutoOutOnALimb\""),"AutoOutOnALimb"),"native JSON string accepted without changing module key");
+Check(Refused(()=>Read<string>("true"))&&Refused(()=>Read<string>("42")),"boolean and integer cannot silently become string query arguments");
+Check(Refused(()=>Read<string>("null")),"null string refused");
+Check(Refused(()=>Read<string>("{\"module\":\"AutoOutOnALimb\"}")),"object cannot coerce into module name");
+Check(Equals(Read<string>("\""+new string('a',4096)+"\""),new string('a',4096)),"bounded string limit accepted");
+Check(Refused(()=>Read<string>("\""+new string('a',4097)+"\"")),"oversized IPC string refused");
+var normalize=plugin.GetType("DalamudMCP.Ipc.IpcSignatures")!.GetMethod("Normalize")!;
+foreach(var signature in new[]{"Func<string, bool>","Func<string, bool?>","Func<string, string>"})
+ Check(Equals(normalize.Invoke(null,new[]{signature}),signature),signature+" is explicitly registered");
 var invoke=type.GetMethod("Invoke")!;
 foreach(var signature in new[]{"Func<bool>","Func<string>"}){
  endpoint.GetType().GetProperty("Signature")!.SetValue(endpoint,signature);
