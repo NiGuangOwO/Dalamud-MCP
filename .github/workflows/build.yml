@@ -29,6 +29,20 @@ jobs:
       - name: Build plugin package
         run: dotnet build src/DalamudMCP/DalamudMCP.csproj --configuration Release
 
+      - name: Package agent guidance
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path agent-guidance | Out-Null
+          Compress-Archive -Path .agents/skills/dalamud-development -DestinationPath agent-guidance/dalamud-development-skill.zip
+          Copy-Item docs/agent-setup.md,docs/dalamud-project.AGENTS.md agent-guidance/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DalamudMCP-agent-guidance
+          path: agent-guidance/*
+          if-no-files-found: error
+          retention-days: 1
+
       - uses: actions/upload-artifact@v4
         with:
           name: DalamudMCP

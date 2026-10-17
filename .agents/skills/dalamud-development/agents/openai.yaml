@@ -1,0 +1,14 @@
+interface:
+  display_name: "Dalamud Development"
+  short_description: "Develop and validate FFXIV plugins with Dalamud-MCP"
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "dalamud"
+      description: "Live FFXIV client state and controlled Dalamud development tools"
+      transport: "streamable_http"
+      url: "http://127.0.0.1:18777/mcp"
+
+policy:
+  allow_implicit_invocation: true

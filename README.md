@@ -14,9 +14,9 @@ An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 107 tools — 6
 inject Dear ImGui input, and register IPC endpoints with other plugins. A background event collector also records game-state changes into
 a ring buffer that an agent can poll instead of re-reading full state.
 
-> **Verification scope.** All 33 read-only tools that existed at the time of the single live verification session
-> were verified against a logged-in client. Offline suites cover the protocol, the transport, the load path, and
-> every shipped tool schema. See [Verification](#verification) and [Limitations](#limitations) for the exact scope.
+> **Verification scope.** The [2026-10-17 audit](docs/tool-audit-2026-10-17.md) observed 62 distinct tools live,
+> including contextual refusals and no-ops; it does not certify every behavior of all 107 tools. Offline suites
+> cover protocol, transport, loading and schemas. Earlier verification history remains below.
 
 ## Contents
 
@@ -141,13 +141,15 @@ installing a plugin. The gate is enforced in two places: mutating tools are filt
 `tools/call` rejects them with an explanatory error even if the client knows the name. Turning the setting on also
 changes the label from "read-only (recommended)" to a warning that "agents may change game state".
 
-**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 41 tools listed in
+**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 42 tools listed in
 this document — action casting and targeting, auto-movement, teleporting, chat and slash commands, plugin
 management, addon-window control, Dear ImGui input injection, and the IPC endpoint registry — can act on the game.
 All of them are flagged mutating, so they stay invisible in `tools/list` and reject `tools/call` until
 `AllowMutatingTools` is turned on; the other 65 tools remain read-only.
 
 ## Connect an agent
+
+Install the bundled [Dalamud development skill](.agents/skills/dalamud-development/SKILL.md) so agents can choose the MCP workflow for plugin debugging and in-game validation without an explicit reminder. This repository's [AGENTS.md](AGENTS.md) supplies project routing; [agent setup](docs/agent-setup.md) explains MCP registration, skill discovery, installation in other plugin projects and an AGENTS template. The server also supplies a short workflow in its MCP initialization instructions. Skill installation and MCP connection are separate steps; implicit selection is not guaranteed.
 
 See [addon probes and the verified developer loader](docs/addon-probes-and-dev-loader.md) for frame-aligned node sampling, conditional input, component-scoped node lookup, development-plugin loading, and the callback-probe address fix. The catalog now has 107 tools (65 read-only, 42 mutating); follow `nextCursor` when listing more than 100 tools.
 
@@ -783,7 +785,11 @@ than failing — the protocol checks still run, and the real-data checks are ski
 
 ### Live verification
 
-In-game verification has been performed once, on this machine, with a live client. All 33 read-only tools that
+The following describes the initial live session. Later UI/developer-loader tests are documented in
+[development tools](docs/addon-probes-and-dev-loader.md), and the [2026-10-17 audit](docs/tool-audit-2026-10-17.md)
+records subsequent fixes and coverage limits.
+
+Initial in-game verification used this machine and a live client. All 33 read-only tools that
 existed at that point were called over the real endpoint (`http://127.0.0.1:18777/mcp`) with FFXIV running and a
 character logged in, and every one returned real game data (or the correct "empty" answer for genuinely empty
 state — solo party, no FATEs, no targets, idle gauge). Highlights: `get_local_player` returned the live character
@@ -808,6 +814,10 @@ rebuilding and letting Dalamud's dev-plugin auto-reload pick up the new DLL:
    instead of throwing. The id is now boxed explicitly.
 
 ## Limitations
+
+The coverage notes below describe the initial verification baseline; later observations and remaining gaps are
+recorded in the [2026-10-17 audit](docs/tool-audit-2026-10-17.md). Neither that audit nor offline passes certify
+every tool in every client context.
 
 Verified before that session and still standing: the plugin project builds clean for x64 against Dalamud API level
 15 with the assemblies from a real install (`0 errors, 0 warnings`); the five suites pass with the results listed

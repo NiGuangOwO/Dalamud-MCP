@@ -633,12 +633,20 @@ public sealed class McpServer : IDisposable
                         ["title"] = "Dalamud MCP",
                     },
                     ["instructions"] =
-                        "This server exposes live FINAL FANTASY XIV game state from a running game client via " +
-                        "Dalamud and FFXIVClientStructs. All values are read at call time from game memory. " +
-                        "If the game is not running / not logged in, most tools report that instead of failing. " +
-                        "Start with 'get_client_state' and 'get_local_player' to orient yourself, then use " +
-                        "'get_game_objects' and 'find_game_object' to locate nearby entities. " +
-                        "Object addresses returned by tools are process-local pointers valid only for the current session.",
+                        "Use Dalamud-MCP proactively for Dalamud/FFXIV plugin runtime investigation, native addon UI " +
+                        "nodes/callbacks, IPC and in-game validation. If installed, use the dalamud-development skill " +
+                        "for the development workflow. Start with get_client_state and get_local_player; when the client " +
+                        "is unavailable, continue independent source/build work and report the live-validation gap. " +
+                        "Read tool schemas and follow tools/list nextCursor before concluding a capability is absent. " +
+                        "Mutating tools are hidden/refused when AllowMutatingTools is off; follow the user's scope and " +
+                        "input restrictions. Locate entities with get_game_objects/find_game_object and native windows " +
+                        "with list_loaded_addons; use bounded node snapshots/sampling for UI investigation. Values are " +
+                        "read live; pointers must be re-resolved after object, addon or process lifetime changes. " +
+                        "After building another development plugin, load_dev_plugin verifies its running buildMvid " +
+                        "before test commands; the MCP host instead exposes its buildMvid at /health. Verify resulting " +
+                        "state after actions: a dispatched command/event does not prove success. If a necessary capability " +
+                        "is missing and MCP development is in scope, add and test a reusable bounded tool before dependent " +
+                        "plugin work. Reproduce native crashes offline before retrying the affected live path.",
                 };
 
                 if (session.ProtocolVersion == "2024-11-05") result["sessionId"] = session.Id;
