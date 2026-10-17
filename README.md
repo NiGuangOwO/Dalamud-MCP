@@ -4,21 +4,21 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Dalamud MCP is a [Dalamud](https://github.com/goatcorp/Dalamud) plugin for FINAL FANTASY XIV that hosts a
-[Model Context Protocol](https://modelcontextprotocol.io) server on a loopback port, giving an AI agent access
-to the live state of a running game client. The plugin runs inside the game process, so it reads the same memory
-the client itself uses: the object table, the local player, party and alliance, targets, FATEs, currency, Excel
-game data, and arbitrary validated raw memory through
-[FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
+Dalamud MCP is a [Dalamud](https://github.com/goatcorp/Dalamud) plugin for FINAL FANTASY XIV.
+It provides a local [Model Context Protocol](https://modelcontextprotocol.io) server for AI-assisted
+plugin development, runtime inspection and in-game validation.
 
-An MCP client connects to `http://127.0.0.1:18777/mcp` and calls 108 tools — 65 read-only, plus 43 mutating tools
-(opt-in) that can act on the game: cast actions, target and move, send chat, manage plugins, drive addon windows,
-inject Dear ImGui input, and register IPC endpoints with other plugins. A background event collector also records game-state changes into
-a ring buffer that an agent can poll instead of re-reading full state.
+The plugin runs within the game process and exposes character, object, party, inventory, game-data and UI state
+through Dalamud services and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
+It also provides validated raw-memory reads, event collection, screenshots and inter-plugin communication.
+The current catalog contains **108 tools: 65 read-only and 43 mutating**. Mutating tools require explicit enablement.
 
-> **Verification scope.** The [2026-10-17 audit](docs/tool-audit-2026-10-17.md) observed 62 distinct tools live,
-> including contextual refusals and no-ops; it does not certify every behavior of all 108 tools. Offline suites
-> cover protocol, transport, loading and schemas. Earlier verification history remains below.
+The default endpoint is `http://127.0.0.1:18777/mcp`. HTTP-capable MCP clients connect directly;
+stdio-only clients use the included bridge.
+
+> **Validation scope:** Offline checks cover protocol, schemas, loading and selected native-memory operations.
+> Live coverage is limited to the scenarios documented in the [tool audit](docs/tool-audit-2026-10-17.md)
+> and [screenshot guide](docs/screenshots.md). These results do not establish compatibility with every client or game state.
 
 ## Contents
 
@@ -35,179 +35,155 @@ a ring buffer that an agent can poll instead of re-reading full state.
 
 ## Install from a plugin repository
 
-For normal use, install the published plugin from [NiGuangOwO's Dalamud plugin repository](https://github.com/NiGuangOwO/DalamudPlugins).
-Use this repository index URL:
+Published releases are available from [NiGuangOwO's Dalamud plugin repository](https://github.com/NiGuangOwO/DalamudPlugins).
+Repository index:
 
 ```text
 https://raw.githubusercontent.com/NiGuangOwO/DalamudPlugins/main/pluginmaster.json
 ```
 
-1. Launch the game with Dalamud enabled, then enter `/xlsettings` in chat to open Dalamud settings.
-2. Open `Experimental`, find `Custom Plugin Repositories`, paste the URL above, add the entry and save the settings.
-3. Enter `/xlplugins` to open the Plugin Installer. Refresh the plugin list, search for **Dalamud MCP**
-   (author: **NiGuangOwO**) in the available plugins and install it. Future releases are updated through the same installer.
-4. Run `/dalamudmcp status` to check the listener, or `/dalamudmcp` to open its settings.
-   The default MCP endpoint is `http://127.0.0.1:18777/mcp`.
+1. Launch the game with Dalamud enabled. Enter `/xlsettings` in chat to open Dalamud settings.
+2. Under `Experimental`, locate `Custom Plugin Repositories`. Add the index URL above and save the settings.
+3. Enter `/xlplugins` to open the Plugin Installer. Refresh the list and install **Dalamud MCP**
+   by **NiGuangOwO**. Subsequent releases are available through the same installer.
+4. Enter `/dalamudmcp status` to inspect listener status, or `/dalamudmcp` to open plugin settings.
 
-Continue with [Configure](#configure) and [Connect an agent](#connect-an-agent) to connect your AI client.
-Mutating tools are disabled by default; enable them in the plugin settings when your task requires them.
-If a new release is missing from the list, wait a few minutes for GitHub's index cache to refresh, then refresh the installer again.
-When switching from a development installation, disable the dev copy before enabling the repository version.
+After installation, follow [Configure](#configure) and [Connect an agent](#connect-an-agent) to complete client setup.
+Mutating tools remain disabled until enabled in plugin settings.
+New releases may take several minutes to appear because of GitHub's index cache.
+When replacing a development installation, disable the dev copy before enabling the repository version.
 
 ## Build
 
-The plugin is built with [`Dalamud.NET.Sdk`](https://www.nuget.org/packages/Dalamud.NET.Sdk), the same SDK
-[SamplePlugin](https://github.com/goatcorp/SamplePlugin) uses, so the project needs no hand-written references to
-the Dalamud assemblies.
+The project uses [`Dalamud.NET.Sdk`](https://www.nuget.org/packages/Dalamud.NET.Sdk).
+Build the plugin project directly from the repository root:
 
 ```powershell
-cd <repo>\src\DalamudMCP
-dotnet build DalamudMCP.csproj -p:Platform=x64
+dotnet build src\DalamudMCP\DalamudMCP.csproj -p:Platform=x64
 ```
 
-The SDK resolves the Dalamud installation from the local XIVLauncher install rather than NuGet. On Windows it picks
-the global launcher path, so `Directory.Build.props` in the same directory pre-seeds the SDK's documented
-`DALAMUD_HOME` override when the CN install is the one present:
+Dalamud assemblies are resolved from the local launcher installation.
+`src\DalamudMCP\Directory.Build.props` selects the CN installation when present and preserves an existing
+`DALAMUD_HOME` override. Otherwise, the SDK uses its default launcher location:
 
 - `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`
 - `%APPDATA%\XIVLauncher\addon\Hooks\dev`
 
-Override it if your assemblies live elsewhere, either by exporting `DALAMUD_HOME` or on the command line:
+For a custom installation, set `DALAMUD_HOME` or specify the assembly directory:
 
 ```powershell
-dotnet build DalamudMCP.csproj -p:Platform=x64 -p:DalamudLibPath="D:\some\Hooks\dev\"
+dotnet build src\DalamudMCP\DalamudMCP.csproj -p:Platform=x64 -p:DalamudLibPath="D:\some\Hooks\dev\"
 ```
 
-There is no `.sln`. Only the plugin, `bridge\` and the test projects are built directly; the SDK contributes the
-`DalamudPackager` package reference and the Dalamud, `Lumina`, `Newtonsoft.Json` and `FFXIVClientStructs`
-references for you. `FFXIVClientStructs.dll` therefore comes from the same `Hooks\dev` directory that Dalamud
-ships, which keeps the structure offsets in sync with the installed Dalamud version.
+The repository contains separate project files for the plugin, bridge and tests; it does not contain a solution file.
+The SDK supplies the Dalamud, Lumina, Newtonsoft.Json and FFXIVClientStructs references, together with DalamudPackager.
+Using FFXIVClientStructs from the installed Dalamud distribution maintains consistency with that distribution's structure definitions.
 
 ### Packaging
 
-`DalamudPackager` runs after every build and generates the plugin manifest from the properties in
-`DalamudMCP.csproj` — there is no hand-maintained `.json` to keep in sync:
+DalamudPackager generates the manifest from `src\DalamudMCP\DalamudMCP.csproj` during the build.
+Output paths below are relative to `src\DalamudMCP`:
 
-| Build | Output |
+| Configuration | Output |
 | --- | --- |
-| `Debug` (default) | `bin\x64\Debug\DalamudMCP.json`, written next to the assembly |
-| `Release` | the same manifest plus `bin\x64\Release\DalamudMCP\latest.zip`, the plugin-repository package |
+| `Debug` (default) | `bin\x64\Debug\DalamudMCP.dll`, `DalamudMCP.json` and `DalamudMCP.deps.json` |
+| `Release` | Release binaries and `bin\x64\Release\DalamudMCP\latest.zip` for repository distribution |
 
 ```powershell
-dotnet build DalamudMCP.csproj -p:Platform=x64 -c Release
+dotnet build src\DalamudMCP\DalamudMCP.csproj -p:Platform=x64 -c Release
 ```
 
-`latest.zip` contains `DalamudMCP.dll`, `DalamudMCP.json` and `DalamudMCP.deps.json`, which is exactly what a
-plugin repository serves. `.github\workflows\build.yml` runs that Release build on every push and pull request and
-uploads the zip as a build artifact.
-
-Debug output lands in `src\DalamudMCP\bin\x64\Debug\` and contains `DalamudMCP.dll`, `DalamudMCP.json` and
-`DalamudMCP.deps.json`.
+`latest.zip` contains `DalamudMCP.dll`, `DalamudMCP.json` and `DalamudMCP.deps.json`.
+The icon is also copied to `images\icon.png` beside the package and embedded in the plugin assembly.
+The [build workflow](.github/workflows/build.yml) produces Release artifacts on pushes and pull requests.
+Published packages are distributed through the plugin repository listed above.
 
 ## Install as a dev plugin
 
-The build output already contains everything Dalamud needs, so it can be registered in place — no copy step is
-required:
+For local development, register the Debug assembly directly:
 
-```
-src\DalamudMCP\bin\x64\Debug\DalamudMCP.dll
-src\DalamudMCP\bin\x64\Debug\DalamudMCP.json
-src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
+```text
+<repo>\src\DalamudMCP\bin\x64\Debug\DalamudMCP.dll
 ```
 
-To test a local Release package, unpack `bin\x64\Release\DalamudMCP\latest.zip` into a directory of
-its own and point the dev-plugin location at that directory instead.
+Keep the generated `DalamudMCP.json` and `DalamudMCP.deps.json` beside the DLL.
+To test a Release package, extract `latest.zip` to a separate directory and register the extracted DLL.
 
 ### Activating in-game
 
-1. Launch the game and use `/xlsettings` in chat or `xlsettings` in the Dalamud Console to open the Dalamud
-   settings.
-    * Go to `Experimental`, and add the full path to `DalamudMCP.dll` from the build output above to the list of
-      Dev Plugin Locations.
-2. Use `/xlplugins` (chat) or `xlplugins` (console) to open the Plugin Installer.
-    * Go to `Dev Tools > Installed Dev Plugins`; `DalamudMCP` should be visible. Enable it.
-3. Once loaded, the plugin starts the listener automatically (`Enabled` and `AutoStart` both default to true).
-   Check it with `/dalamudmcp status`.
+1. Open `/xlsettings`. Under `Experimental`, add the full DLL path to `Dev Plugin Locations`.
+2. Open `/xlplugins`, select `Dev Tools > Installed Dev Plugins`, and enable `DalamudMCP`.
+3. Run `/dalamudmcp status` to verify listener status. `Enabled` and `AutoStart` default to `true`.
 
-Step 1 only needs to be performed once; it is preserved afterwards. The plugin can be disabled, enabled or set to
-load at startup from the Plugin Installer at any time.
+The development-plugin location is retained in Dalamud settings.
+Loading and automatic-start options are managed through the Plugin Installer.
 
 ## Configure
 
-Open the settings window with `/dalamudmcp` (or the plugin-installer config button). The window title is
-"Dalamud MCP".
+Open **Dalamud MCP** settings with `/dalamudmcp` or the Plugin Installer's configuration button.
 
-| Setting | Default | Meaning |
+| Setting | Default | Description |
 | --- | --- | --- |
-| `Enabled` | `true` | Master switch for the listener. |
-| `AutoStart with the plugin` | `true` | Start the listener when the plugin loads. |
-| `Port` | `18777` | TCP port. Clamped to 1024-65535. Bound to `127.0.0.1` only. |
-| `Framework timeout (s)` | `10.0` | How long a tool call waits for the game's framework thread before failing. Clamped to 0.5-120. |
-| `Allow mutating tools` | `false` | Whether tools that change game state are visible to and callable by clients. |
-| `Auth token` | empty | Shared secret. Empty disables authentication. |
-| `Max object results` | `200` | Upper bound on objects returned by one query. Clamped to 1-5000. |
-| `Max memory read (bytes)` | `65536` | Upper bound for a single raw memory read. Clamped to 16-1048576. |
-| `Log every MCP request` | `false` | Write each JSON-RPC request and its outcome (method, id, tool name, elapsed ms) to the plugin log. Read live, so toggling it applies at once. Off by default because a polling agent can issue many calls per second. |
-| `Language` | `auto` | UI and `/dalamudmcp` feedback language. `auto` follows the game client's language; `English` and `简体中文` are also available. Takes effect immediately, no reload needed. |
+| `Enabled` | `true` | Enables the listener. |
+| `AutoStart with the plugin` | `true` | Starts the listener when the plugin loads. |
+| `Port` | `18777` | TCP port, limited to 1024–65535 and bound to `127.0.0.1`. |
+| `Framework timeout (s)` | `10.0` | Framework-thread execution timeout, limited to 0.5–120 seconds. |
+| `Allow mutating tools` | `false` | Makes tools that can change game or plugin state available to clients. |
+| `Auth token` | empty | Shared authentication token; an empty value disables authentication. |
+| `Max object results` | `200` | Per-query object limit, constrained to 1–5000. |
+| `Max memory read (bytes)` | `65536` | Maximum raw-memory read size, constrained to 16–1048576 bytes. |
+| `Log every MCP request` | `false` | Records method, request ID, tool name, outcome and duration. Changes apply immediately. |
+| `Language` | `auto` | UI and command-feedback language. Supports automatic selection, English and Simplified Chinese. Changes apply immediately. |
 
-Port and timeout changes need a listener restart; the window says so and offers a "Restart listener" button. Other
-edits take effect immediately. Settings persist when a control loses focus after an edit, so dragging a slider does
-not rewrite the config file every frame. The window also offers "Save now", "Start listener" / "Stop listener" /
-"Restart listener", and "Open config folder".
+Port and framework-timeout changes require a listener restart using `Restart listener`.
+Other settings apply immediately. Edits are saved when the edited control loses focus;
+`Save now` provides an explicit save action. The window also provides listener controls and `Open config folder`.
 
-The plugin ships English and Simplified Chinese strings (`src\DalamudMCP\Localization.cs`). With the default
-`Language: auto`, a Chinese game client shows Chinese labels, command feedback and the bind-failure toast; an
-English client shows English. The tables compile into the plugin DLL (no satellite resources) and missing keys
-fall back to English.
+With `Language: auto`, the UI follows the game client's language. Translation tables are embedded in the DLL;
+unresolved translation keys fall back to English.
 
-`AllowMutatingTools` defaults to **off**, so write access is granted explicitly rather than as a side effect of
-installing a plugin. The gate is enforced in two places: mutating tools are filtered out of `tools/list`, and
-`tools/call` rejects them with an explanatory error even if the client knows the name. Turning the setting on also
-changes the label from "read-only (recommended)" to a warning that "agents may change game state".
-
-**Note:** the gate is fully implemented and tested, and the mutating tools ship behind it. The 43 tools listed in
-this document — action casting and targeting, auto-movement, teleporting, chat and slash commands, plugin
-management, addon-window control, Dear ImGui input injection, and the IPC endpoint registry — can act on the game.
-All of them are flagged mutating, so they stay invisible in `tools/list` and reject `tools/call` until
-`AllowMutatingTools` is turned on; the other 65 tools remain read-only.
+`AllowMutatingTools` is enforced for both discovery and invocation.
+When disabled, mutating tools are omitted from `tools/list` and rejected by `tools/call`.
 
 ## Connect an agent
 
-Install the bundled [Dalamud development skill](.agents/skills/dalamud-development/SKILL.md) so agents can choose the MCP workflow for plugin debugging and in-game validation without an explicit reminder. This repository's [AGENTS.md](AGENTS.md) supplies project routing; [agent setup](docs/agent-setup.md) explains MCP registration, skill discovery, installation in other plugin projects and an AGENTS template. The server also supplies a short workflow in its MCP initialization instructions. Skill installation and MCP connection are separate steps; implicit selection is not guaranteed.
+Connection setup and skill installation are separate operations.
+The [agent setup guide](docs/agent-setup.md) covers MCP registration, skill discovery and installation in other plugin projects.
+The included [Dalamud development skill](.agents/skills/dalamud-development/SKILL.md), repository [AGENTS.md](AGENTS.md)
+and server initialization instructions describe the development workflow. Skill selection depends on the agent's discovery mechanism.
 
-See [addon probes and the verified developer loader](docs/addon-probes-and-dev-loader.md) for frame-aligned node sampling, conditional input, component-scoped node lookup, development-plugin loading, and the callback-probe address fix. The catalog now has 108 tools (65 read-only, 43 mutating); follow `nextCursor` when listing more than 100 tools.
+The [addon and development-loader guide](docs/addon-probes-and-dev-loader.md) describes frame-aligned UI sampling,
+conditional input, node lookup and development-plugin loading.
+Use the connected tool schemas as the parameter reference. `tools/list` is paginated; continue with `nextCursor`
+until all pages have been retrieved.
 
-Endpoints, all on `127.0.0.1`:
+All endpoints bind to `127.0.0.1`:
 
 | Endpoint | Method | Purpose |
 | --- | --- | --- |
-| `/mcp` | POST / GET / DELETE | Streamable HTTP transport. The main endpoint. |
-| `/sse` | GET | Legacy HTTP+SSE transport (protocol 2024-11-05). |
-| `/messages?sessionId=...` | POST | Legacy transport message sink, paired with `/sse`. |
-| `/health` | GET | Status: tool count, protocol versions, session count, whether auth and mutating tools are on. |
-| `/tools` | GET | Flat tool catalog (name, title, description, mutating flag). |
-| `/` | GET | Server info and the transport map. |
+| `/mcp` | POST / GET / DELETE | Primary Streamable HTTP transport. |
+| `/sse` | GET | Legacy HTTP+SSE transport for protocol revision `2024-11-05`. |
+| `/messages?sessionId=...` | POST | Legacy message endpoint paired with `/sse`. |
+| `/health` | GET | Listener status, tool count, protocol versions, session count and access settings. |
+| `/tools` | GET | Tool catalog with names, descriptions and mutation classifications. |
+| `/` | GET | Server information and transport endpoints. |
 
-The server advertises protocol revisions `2025-06-18`, `2025-03-26` and `2024-11-05`.
+Supported protocol revisions are `2025-06-18`, `2025-03-26` and `2024-11-05`.
+After `initialize`, requests must include the `Mcp-Session-Id` response header received during the handshake.
+A missing session returns HTTP `400` with `session_required`; an expired or unknown session returns HTTP `404`
+with `session_not_found`. The client must initialize a new session after either response.
 
-**`Mcp-Session-Id` is required after `initialize`.** Only the `initialize` request may be sent without it. Every
-later POST to `/mcp` must carry the `Mcp-Session-Id` header returned by the handshake, or the server answers `400`
-with `{"error":"session_required"}`. An id the server no longer knows returns `404` with
-`{"error":"session_not_found"}` so the client re-initializes instead of looping. A conforming MCP client handles
-this automatically.
+When an authentication token is configured, requests require:
 
-If an auth token is set, every request must carry it — including `/health` and `/tools`. Only `OPTIONS` (CORS
-preflight) and `GET /` are answered without it:
-
-```
+```text
 Authorization: Bearer <token>
 ```
 
-A `?token=<token>` query parameter is accepted as an alternative, which is convenient for a browser tab or a
-client that cannot set headers.
+Authentication applies to `/health` and `/tools` as well as MCP traffic.
+`OPTIONS` and `GET /` are exempt. The server also accepts `?token=<token>` for clients that cannot set headers.
 
-A generic MCP client configuration for an HTTP-capable client looks like this — consult your client's
-documentation for the exact key names, since they differ:
+The following example illustrates an HTTP-capable MCP configuration.
+Configuration keys depend on the client implementation:
 
 ```json
 {
@@ -223,20 +199,17 @@ documentation for the exact key names, since they differ:
 }
 ```
 
-The `headers` block can be omitted entirely when no auth token is set.
+Omit `headers` when authentication is disabled.
 
 ### stdio-only clients
 
-Some clients launch a subprocess and speak JSON-RPC over stdin/stdout instead of HTTP. This repository ships a
-bridge for that case: `bridge\DalamudMcpBridge`. It is a small, dependency-free console app that reads
-newline-delimited JSON-RPC on stdin and forwards each message to the plugin's HTTP endpoint, so point the client's
-`command` at the **bridge**, never at the plugin DLL.
+`bridge\DalamudMcpBridge` provides a console bridge for clients that launch a subprocess and exchange
+newline-delimited JSON-RPC over stdin/stdout. Set the client's `command` to the bridge executable.
+The plugin DLL runs inside Dalamud and is not a stdio executable.
 
 ```powershell
 dotnet build bridge\DalamudMcpBridge\DalamudMcpBridge.csproj -c Release
 ```
-
-Then configure the client with the built executable:
 
 ```json
 {
@@ -248,31 +221,15 @@ Then configure the client with the built executable:
 }
 ```
 
-The bridge takes `--port <n>`, `--url <http://host:port>`, `--token <token>` and `--verbose`, and also reads
-`DALAMUD_MCP_PORT`, `DALAMUD_MCP_URL` and `DALAMUD_MCP_TOKEN` from the environment, so the flags can stay out of
-the client config. It resolves to `http://127.0.0.1:18777` when nothing is given.
+The bridge accepts `--port`, `--url`, `--token` and `--verbose`.
+It also reads `DALAMUD_MCP_PORT`, `DALAMUD_MCP_URL` and `DALAMUD_MCP_TOKEN`.
+The default server address is `http://127.0.0.1:18777`.
 
-Two things it handles that a raw pipe would not:
+The bridge retains the HTTP session header, reinitializes invalid sessions and retries the original request once.
+Before processing stdin, it checks `/health`; authentication failures terminate startup with a diagnostic message.
+Protocol output is written to stdout and diagnostics to stderr.
 
-- **Session capture.** The plugin issues a session id in the `Mcp-Session-Id` *response header* during the
-  handshake. A stdio client only ever sees the JSON body, so it could never observe or echo that id. The bridge
-  captures it and attaches it to every later request.
-- **Re-handshake.** If the game or plugin reloads, the session id goes stale. The bridge detects the
-  `session_required` rejection, mints a fresh session with its own `initialize`, replays the handshake
-  notification, and retries the original request once — so a reload does not require restarting the client.
-
-It also fails fast and loudly on an auth mismatch. Before it opens the stream it probes `GET /health`, and a
-non-success answer is fatal rather than something to carry on past. A `401` states whether the problem is a missing
-token or a wrong one, and names the fix:
-
-```
-[bridge] the plugin requires a bearer token and none was supplied.
-[bridge] pass --token <token> (or set DALAMUD_MCP_TOKEN) to match the plugin's AuthToken setting.
-```
-
-stdout carries protocol messages only; all diagnostics go to stderr, so `--verbose` is safe to leave on.
-
-Verify the server is up before wiring a client:
+Check server availability before configuring the client:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:18777/health
@@ -281,16 +238,16 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-108 tools: 65 read-only plus 43 mutating tools (control, chat, plugin management, addon windows, Dear ImGui
-input injection, and the IPC endpoint registry) that are hidden until `AllowMutatingTools` is on. Names are
-exactly as they appear in `tools/list`.
+The catalog contains 108 tools: 65 read-only and 43 mutating. The tables summarize the principal tools and parameters.
+The server's `tools/list` schemas define the complete catalog and argument constraints.
+Mutating tools are available only when `AllowMutatingTools` is enabled.
 
 ### Client and session
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `get_client_state` | Login status, zone/territory (id and name), map, instance, language, PvP/PvP-excluding-Den/GPose flags, idle state, the blocking condition flag, whether the local player object is loaded, framework update delta, last update time, process id and pointer size. The recommended first call, since most other tools report nothing useful while logged out. | none |
-| `get_local_player` | The character you control: identity, world, job, level, HP/MP, position, statuses, plus account-level identity from `PlayerState` (content id, home/current world, race, tribe, sex, effective level, level-sync and grand company). Returns `loggedIn=false` when logged out, or `loggedIn=true` with `playerLoaded=false` while the character is still loading. | none |
+| `get_client_state` | Returns login state, territory, map, instance, language, PvP/GPose flags, idle and blocking conditions, player loading state, framework timing, process ID and pointer size. Recommended before other game-state queries. | none |
+| `get_local_player` | Returns local-character identity, world, job, level, HP/MP, position and statuses, plus account-level data from `PlayerState`. Reports `loggedIn=false` when logged out, or `loggedIn=true` with `playerLoaded=false` while loading. | none |
 | `get_player_attributes` | Character-sheet attributes via `IPlayerState.GetAttribute`, plus base Strength/Dexterity/Vitality/Intelligence/Mind/Piety. Non-zero attributes only. | none |
 | `get_job_levels` | Level, experience and unlocked flag for each class and job, marking which is current. Jobs that are neither unlocked nor levelled are skipped. | none |
 | `get_conditions` | Every `ConditionFlag` currently true, plus explicit booleans for `inCombat`, `mounted`, `crafting`, `gathering`, `betweenAreas`, `watchingCutscene`, `occupiedInEvent` and `boundByDuty`. | none |
@@ -303,7 +260,7 @@ exactly as they appear in `tools/list`.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `get_game_objects` | Objects loaded around you: players, NPCs, enemies, minions, mounts, treasure, aetherytes. | `objectKind`, `nameContains`, `maxDistance`, `detailed` (default true), `max` (default 200) |
+| `get_game_objects` | Objects loaded around the local player: players, NPCs, enemies, minions, mounts, treasure, aetherytes. | `objectKind`, `nameContains`, `maxDistance`, `detailed` (default true), `max` (default 200) |
 | `find_game_object` | One object by id or exact name, plus alternatives sharing the name. | `entityId`, `gameObjectId`, `name` |
 | `get_party` | Party or alliance members with jobs, levels, HP/MP, world, territory and statuses. | none |
 | `get_targets` | Current, focus, soft, mouseover, mouseover-nameplate, previous and GPose targets. | none |
@@ -320,22 +277,21 @@ exactly as they appear in `tools/list`.
 | `get_buddy_list` | Companion buddies: chocobo and pet/trust buddies with entity id, data id, HP/MP and the resolved game object when present. | none |
 | `get_duty_state` | Whether a duty is currently started, plus the content-finder condition (name, id) when one is bound. | none |
 
-Tools that need a loaded character return `{"available": false, "reason": "not logged in"}` rather than failing
-when you are at the title screen, so a call is always safe.
+Tools that require a loaded character report an unavailable state and reason when the character is absent, for example `{"available": false, "reason": "not logged in"}`.
 
 ### Game data (Excel)
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `search_game_data` | Text search across a sheet's searchable text columns (Item, Action, Status, Quest, Mount, TerritoryType, World, ClassJob, ...). Use `get_game_data_sheet_info` first to see which columns are searchable. | `sheet` (required), `query` (required), `exact` (default false), `max` (default 25, max 200) |
-| `get_game_data_row` | One row by id, returning every readable column (capped at 120 columns per row; `ExcelPage` and `RowOffset` are skipped, empty values omitted). Row references come back as `{"rowId": n}`, not expanded. | `sheet` (required), `rowId` (required) |
-| `list_game_data_sheets` | Sheet names, optionally filtered. Over a thousand exist, so filter. | `filter`, `max` (default 200, max 2000) |
+| `get_game_data_row` | One row by id, returning every readable column (capped at 120 columns per row; `ExcelPage` and `RowOffset` are skipped, empty values omitted). Row references are returned as `{"rowId": n}`, not expanded. | `sheet` (required), `rowId` (required) |
+| `list_game_data_sheets` | Lists sheet names with optional name filtering and a result limit. | `filter`, `max` (default 200, max 2000) |
 | `get_game_data_sheet_info` | Sheet name, full row type, whether the client loaded the sheet, row count, column count with index/type/offset, the searchable text columns, and the property count. | `sheet` (required) |
 | `get_item` | Item name, singular, description, item level, equip level, rarity, item action, UI/search category, class-job category, stack size, HQ flag, untradable flag, mid/low vendor price, collectable flags. | `itemId`, `name` (exact unless `contains`), `contains` (default false) |
-| `get_action` | Action name, description, job abbreviation, class-job level, cast/recast times (in 100 ms units), range, effect range, primary/secondary cost type and value, category, target area, PvP and player-action flags. The description lives on the separate `ActionTransient` sheet and may be absent. | `actionId`, `name` (exact) |
+| `get_action` | Action name, description, job abbreviation, class-job level, cast/recast times (in 100 ms units), range, effect range, primary/secondary cost type and value, category, target area, PvP and player-action flags. The description is stored in the separate `ActionTransient` sheet and may be absent. | `actionId`, `name` (exact) |
 | `get_status` | Status name, description, icon, max stacks, FC-buff flag, category, dispel/gaze/permanent flags, party-list priority and the movement/action locks. | `statusId`, `name` |
 | `get_territory` | Zone name, place name, zone and region names, map, content-finder condition, aetheryte, expansion, PvP-zone flag and mount/stealth permission. | `territoryId`, `name` (case-insensitive substring) |
-| `get_class_job` | Class/job definitions: name, abbreviation, English name, category, starting level, duty-queue flag, soul crystal and unlock quest. Omit the id to list all — the cheapest way to map a job id to a name. | `classJobId` |
+| `get_class_job` | Returns class/job definitions: name, abbreviation, English name, category, starting level, queue flag, soul crystal and unlock quest. Omitting the ID lists all entries. | `classJobId` |
 
 ### Raw memory
 
@@ -343,107 +299,79 @@ when you are at the title screen, so a call is always safe.
 | --- | --- | --- |
 | `read_memory` | Read an absolute address as a hex+ASCII dump or a scalar. Validated against the OS region map first. Hex dumps are capped at 4096 bytes. | `address` (required, hex string), `format` (default `hexdump`), `length` (default 256 hexdump / 1024 string / format size) |
 | `query_memory_region` | OS-reported state for addresses: committed, readable, writable, executable, protection, owning region. With `length`, walks up to 64 regions so a buffer crossing page boundaries is fully described. | `address` (required), `length` |
-| `read_pointer_chain` | Follow a multi-level pointer from a static base: dereference, add offset, repeat, optionally decoding a value at the end. Returns every intermediate address so a broken step is obvious. | `address` (required), `offsets` (required, max 16 levels), `valueFormat` |
-| `get_module_info` | Game module name, base and size, Dalamud's search base, whether the scanner runs on a copy, the `.text` / `.data` / `.rdata` section bases and sizes, and the section offsets so you can tell whether this build reports them absolute or relative. | none |
-| `scan_signature` | Byte-pattern scan with `??` wildcards via Dalamud's signature scanner. | `signature` (required), `section` (`text` default, `data`, `rdata`, `module`), `maxResults` (default 1, 0 for all) |
-| `read_object_memory` | Read at a game object's address plus an offset — the bridge from typed object tools to raw bytes. Resolve the object by `entityId`, `objectIndex`, `localPlayer`, or pass an absolute `address` directly. Negative offsets are allowed for walking backwards inside a struct. | `entityId`, `objectIndex`, `localPlayer`, `address`, `offset`, `length` (default 64), `format` |
+| `read_pointer_chain` | Dereferences a base address and applies successive offsets, optionally decoding the final value. Intermediate addresses identify the failing step. | `address` (required), `offsets` (required, max 16 levels), `valueFormat` |
+| `get_module_info` | Returns module name, base address, size, scanner-copy status, section addresses and offsets for interpreting live and copied-module results. | none |
+| `scan_signature` | Scans the selected section for a byte pattern with `??` wildcards and returns addresses and offsets within bounded result limits. | `signature` (required), `section` (`text` default, `data`, `rdata`, `module`), `maxResults` (default 1; 0 requests up to 4096; inspect `truncated`) |
+| `read_object_memory` | Reads data at an object address plus an offset. Resolves `entityId`, `objectIndex` or `localPlayer`, or accepts an absolute `address`. Negative offsets are supported. | `entityId`, `objectIndex`, `localPlayer`, `address`, `offset`, `length` (default 64), `format` |
 
 ### Direct structs (FFXIVClientStructs)
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `get_job_gauge` | The live job gauge read straight from `JobGaugeManager`'s memory, for gauge state Dalamud's managed API does not expose (no gauge accessor is among the injectable services). Reports `classJobId`, then locates the dedicated gauge struct for that job inside the manager's union and decodes every `[FieldOffset]` field — including `BitFieldAttribute` bit ranges, rendered as named bits — plus the raw bytes. Jobs without a dedicated gauge (Arcanist, Rogue, Blue Mage) return `hasDedicatedGauge=false`. | none |
-| `get_active_statuses` | The raw 60-slot `StatusManager` of a BattleChara, read at its struct offset rather than through Dalamud's `StatusList`: owner address, the extra-flags byte, the special-status timer/direction float, and every status entry (id, param, remaining time, source object id, sheet name/description/stacks). Resolve the target like `read_object_memory`, or pass an absolute `address`. | `address`, `entityId`, `objectIndex`, `localPlayer`, `max` (default 60) |
+| `get_job_gauge` | Reads job-gauge state from `JobGaugeManager`, including `classJobId`, dedicated gauge fields, named bit ranges and raw bytes. Jobs without a dedicated gauge return `hasDedicatedGauge=false`. | none |
+| `get_active_statuses` | Reads a BattleChara's 60-slot `StatusManager`, preserving native slot indices while omitting empty entries. Returns native header data and active status details, including ID, parameter, duration, source and sheet metadata. Target selection follows `read_object_memory`. | `address`, `entityId`, `objectIndex`, `localPlayer`, `max` (default 60) |
 
-Both tools degrade the same way everywhere else in this plugin: if FFXIVClientStructs' static address resolver has
-not initialized (the plugin loaded before the game was ready) the tools return `{"available": false, ...}` with a
-reason, never a thrown exception.
+Tools that depend on FFXIVClientStructs report an unavailable state when the static address resolver is not initialized.
 
-Valid `format` values for `read_memory` and `read_object_memory`: `hexdump`, `bytes`, `u8`, `u16`, `u32`, `u64`,
-`i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `string`, `utf16`, `pointer`.
+Supported `format` values for `read_memory` and `read_object_memory` are `hexdump`, `bytes`, `u8`, `u16`, `u32`, `u64`,
+`i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `string`, `utf16` and `pointer`.
 
-Addresses are emitted and accepted as hex strings such as `"0x7FF6A1B2C3D4"`, because JSON numbers lose integer
-precision past 2^53 and 64-bit pointers routinely exceed that. The parser also accepts a trailing `h`, underscores
-and bare decimal, but passing a quoted `0x` string is the reliable form.
+Addresses use hexadecimal strings such as `"0x7FF6A1B2C3D4"` to preserve precision beyond the JSON integer limit of 2^53.
+The parser also accepts a trailing `h`, underscores and decimal values; quoted `0x` strings are recommended.
 
-### UI (mutating, opt-in)
+### UI (includes mutating operations)
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `open_addon` | Opens an in-game addon/system window through `AgentInterface.Show()` on the agent that owns it — the same path the game's own UI uses. The addon must be named from a fixed allowlist of ~66 agents (inventory, armoury, emote list, quest journal, achievements, mount/minion notebooks, orchestrion, teleport, duty finder, gear sets, config, currency, retainer, free company, and more); unknown or non-openable names are rejected rather than guessed. Opening dispatches one Show request; wait for the loaded addon and its controls to become ready before interacting. | `addon` (required, enum of allowlisted names) |
+| `open_addon` | Requests an allowlisted game window through its owning agent's `AgentInterface.Show()`. Unsupported names are rejected. Confirm that the addon and controls are loaded before interacting. | `addon` (required, enum of allowlisted names) |
 | `close_addon` | Closes one of the same allowlisted addon windows through `AgentInterface.Hide()`. Closing a window that is not open is a no-op, not an error. | `addon` (required, enum) |
-| `get_addon_state` | Read-only census: which of the allowlisted agents are currently active. Reports `active` and `inactive` name lists. | none |
-| `list_addon_elements` | Walks a loaded addon's node tree (DFS from its root node) and reports each node's id, type, label, size, screen position and whether it is clickable — the discovery half of UI automation. Component nodes (buttons, lists, drop-downs) report their runtime composite type. | `addon` or `addonId`, `maxDepth` (default 12), `maxNodes` (default 100) |
-| `click_addon_element` | Dispatches one Atk UI event to a node inside a loaded addon through the addon's own `ReceiveEvent` — the same dispatch the real input pipeline feeds. Event types: `click` (MouseClick), `doubleClick`, `buttonClick` (ButtonClick 25), `buttonPress` (23), `buttonRelease` (24), or `registered` (fires every handler the node has registered). A real click is a press+release pair, so closing a window is `buttonPress` followed by `buttonRelease`. | `addon` or `addonId`, `nodeId` or `index`, `event`, `param` (advanced override) |
-| `get_addon_strings` | Reports the string and scalar values an addon currently carries in its `AtkValue` table — the text a menu, dialog or list is displaying right now. Each entry is index, type and decoded value; control characters are escaped so the raw payload stays visible. Read-only. | `addon` or `addonId`, `maxValues` (1-500, default 200), `stringsOnly` |
-| `select_addon_menu_item` | Picks an entry from a menu-style addon (one whose options live in its `AtkValue` table) by label, and activates it by firing the addon's callback with that entry's index — the same call the game makes when the option is clicked. Matching is exact after normalization unless `containsMatch` is set. | `addon` or `addonId`, `label` or `index`, `containsMatch`, `dryRun` |
-| `probe_receive_event_enable` | Diagnostic: swaps one loaded addon's `ReceiveEvent` vtable slot so every UI event it receives — real or synthetic — is captured before being forwarded. Use with `probe_receive_event_dump` to compare what a real click delivers versus what `click_addon_element` sends. | `addon` or `addonId` |
-| `probe_receive_event_enable_listener` | Same capture, but hooks a specific node's first registered listener instead of the addon itself (real component clicks land on node-registered listeners). | `addon` or `addonId`, `nodeId` (required) |
+| `get_addon_state` | Queries the activity state of allowlisted agents and returns `active` and `inactive` name lists. Read-only. | none |
+| `list_addon_elements` | Enumerates loaded addon nodes with bounded traversal, returning IDs, types, labels, dimensions, positions and clickability. Component nodes include their runtime component type. | `addon` or `addonId`, `maxDepth` (default 12), `maxNodes` (default 100) |
+| `click_addon_element` | Dispatches an Atk UI event through `ReceiveEvent`. Supports `click`, `doubleClick`, `buttonClick`, `buttonPress`, `buttonRelease` and `registered`. Behavior depends on the target node and listener. | `addon` or `addonId`, `nodeId` or `index`, `event`, `param` (advanced override) |
+| `get_addon_strings` | Reads strings and scalar values from the addon's `AtkValue` table, returning index, type and decoded value with escaped control characters. Read-only. | `addon` or `addonId`, `maxValues` (1-500, default 200), `stringsOnly` |
+| `select_addon_menu_item` | Selects a menu-style addon entry by label or index and submits it through the addon callback. Matching is exact after normalization unless `containsMatch` is enabled. | `addon` or `addonId`, `label` or `index`, `containsMatch`, `dryRun` |
+| `probe_receive_event_enable` | Installs a `ReceiveEvent` vtable probe on a loaded addon and records events before forwarding. Use the dump tool to compare user input with synthetic events. | `addon` or `addonId` |
+| `probe_receive_event_enable_listener` | Installs an event probe on the specified node's first registered listener for component-level input analysis. | `addon` or `addonId`, `nodeId` (required) |
 | `probe_receive_event_disable` | Restores the hooked vtable slot. | none |
 | `probe_receive_event_dump` | Returns every captured `ReceiveEvent` call: event type, param, and the raw event/event-data buffers decoded at their FCS offsets. Read-only. | none |
-| `probe_callback_enable` | Diagnostic: hooks `AtkUnitBase.FireCallback` globally (the game's own addon callback entry, resolved from its call-site signature) so every callback the game performs is recorded with its decoded `AtkValue[]` arguments. Use with `probe_callback_dump` to learn which `(addon, values)` payload reproduces an action. Mutating. | none |
+| `probe_callback_enable` | Installs a global `AtkUnitBase.FireCallback` probe and records addon callbacks with decoded `AtkValue[]` arguments for payload analysis. Mutating. | none |
 | `probe_callback_disable` | Unhooks the FireCallback probe. Mutating. | none |
 | `probe_callback_dump` | Returns every captured callback: addon name, value count, each `AtkValue` decoded by type (Int/UInt/Bool/Float/String/...), the close/update-visibility flag, and the return value. Read-only. | none |
 
-The mutating tools in this set are `open_addon`, `close_addon`, `click_addon_element`,
-`select_addon_menu_item`, and the five `probe_*` tools that install hooks. `get_addon_state`,
-`list_addon_elements`, `get_addon_strings`, `probe_receive_event_dump` and `probe_callback_dump` are read-only.
-Failures (agent module not initialized, agent not openable) return structured
-`{"available": false, "reason": ...}` instead of throwing, like the rest of the tool set.
+This group combines read-only queries and mutating operations. Window control, event dispatch, menu selection
+and probe activation/deactivation require mutation permission. State, node, text and probe-log queries are read-only.
 
-Two operational notes from live testing: `open_addon currency` and `close_addon currency` open and close the
-Currency window as expected. `get_addon_state` reports `AgentInterface.IsAgentActive`, which does not flip for
-every agent when its window shows — a window can be visibly open while its agent still reports inactive, so the
-census is a hint rather than ground truth and `open_addon`/`close_addon` are the reliable operations. A synthetic
-`buttonPress`+`buttonRelease` pair on the Currency window's close collision node closes the window; real mouse
-clicks reach component-registered listeners rather than the addon's vtable, which is why the `registered` event
-mode and the listener-level probe exist.
+`get_addon_state` reports `AgentInterface.IsAgentActive`, which does not necessarily match window visibility.
+Event behavior depends on the registered listener; some controls require a press/release sequence across frames.
+See the [development guide](docs/addon-probes-and-dev-loader.md) and [audit](docs/tool-audit-2026-10-17.md) for validation scope.
 
-### Dear ImGui input injection (mutating, opt-in)
+### Dear ImGui input injection (includes mutating operations)
 
-These tools drive any Dear ImGui window in the process by pushing events into Dear ImGui's own input
-queue — the same `AddMousePosEvent` / `AddMouseButtonEvent` / `AddKeyEvent` / `AddInputCharacter` calls a
-real backend makes. Nothing here knows about any other plugin: the tools take coordinates, ids and key
-names that Dear ImGui itself exposes, so they apply equally to Dalamud's windows, this plugin's, and every
-third-party plugin's, without referencing a single plugin assembly, window name or command. Combine
-`imgui_windows` (find the rectangle) with `imgui_hover_grid` (find the controls inside it) and you never
-need to know who drew the window.
+These tools submit mouse, keyboard and character events through Dear ImGui's input queue for Dalamud and plugin windows.
+They use coordinates, control IDs and Dear ImGui key names without referencing the target plugin assembly.
+Use `imgui_windows` to locate a window and `imgui_hover_grid` to inspect control hit regions.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `imgui_state` | What Dear ImGui currently believes about the pointer and focus: frame count, display size, mouse position, per-button down state, the `WantCaptureMouse` / `WantCaptureKeyboard` / `WantTextInput` flags, and the hovered / active / nav window and id. The ground truth for the injection tools — read it before and after a click to see what changed. Read-only. | none |
+| `imgui_state` | Returns frame count, display dimensions, pointer and button state, capture flags, and hovered/active/navigation window and control IDs. Read-only; suitable for comparing input state before and after an operation. | none |
 | `imgui_windows` | Every Dear ImGui window in the process with its name, id, position, size and its active / hidden / collapsed / focused flags, in the same coordinate space the mouse tools accept. Filter with `contains` to match a name fragment. Read-only. | `contains`, `onlyActive`, `onlyVisible`, `max` (default 200) |
-| `imgui_mouse_move` | Moves the injected pointer and lets it settle, then reports what is hovered. | `x`, `y` (required), `settleFrames` (default 2), `moveCursor`, `restoreCursor` |
-| `imgui_mouse_click` | Injects a real press-and-release at a coordinate. The down and up land on separate frames, so the click is not collapsed by ImGui's trickle queue. | `x`, `y`, `button` (0 left/1 right/2 middle), `double`, `settleFrames` (default 3), `moveCursor`, `restoreCursor` |
+| `imgui_mouse_move` | Sets the injected pointer position, waits the requested number of frames and reports hover state. | `x`, `y` (required), `settleFrames` (default 2), `moveCursor`, `restoreCursor` |
+| `imgui_mouse_click` | Injects a press and release at the specified coordinates on separate frames to avoid merging by the ImGui trickle queue. | `x`, `y`, `button` (0 left/1 right/2 middle), `double`, `settleFrames` (default 3), `moveCursor`, `restoreCursor` |
 | `imgui_mouse_scroll` | Injects a wheel event, optionally moving to a widget first. Deltas are in ImGui notches. | `x`, `y`, `deltaY` (default -3), `deltaX`, `settleFrames` |
 | `imgui_key_press` | A complete key press with optional Ctrl / Shift / Alt held across the chord, using Dear ImGui key names (`Enter`, `Escape`, `A`, `F1`, `LeftArrow`, `LeftCtrl`, ...). | `key` (required), `ctrl`, `shift`, `alt` |
-| `imgui_key` | A bare key down or up with no pairing, for holding a modifier across other calls. | `key`, `down` (both required) |
-| `imgui_text` | Types a string through the character-input path, so IME-free text including CJK reaches whatever ImGui field has keyboard focus. Send it after focusing the field. | `text` (required), `charsPerFrame` (1-16, default 16) |
-| `imgui_hover_grid` | The generic control-discovery primitive. Sweeps the pointer over a `cols x rows` grid covering a rectangle, holding each position one frame and sampling the next, and returns whether each cell is inside a window and which id is hovered. One call reconstructs the hit layout of any window; `rows=1` is a horizontal scan line. | `x0`, `y0`, `x1`, `y1` (required), `cols` (default 8), `rows` (default 8), `settleFrames` |
-| `imgui_wait` | Idles for a number of frames so a popup or layout change can settle. Read-only. | `frames` (1-600, default 30) |
+| `imgui_key` | Submits an individual key-down or key-up event, allowing a modifier to remain held across multiple calls. | `key`, `down` (both required) |
+| `imgui_text` | Submits text through the character-input path to the focused ImGui field, including CJK characters. The target field must have keyboard focus. | `text` (required), `charsPerFrame` (1-16, default 16) |
+| `imgui_hover_grid` | Samples a rectangular `cols x rows` grid, returning window hit state and hovered control IDs. `rows=1` produces a horizontal scan. | `x0`, `y0`, `x1`, `y1` (required), `cols` (default 8), `rows` (default 8), `settleFrames` |
+| `imgui_wait` | Waits the requested number of draw frames for popup or layout updates. Read-only. | `frames` (1-600, default 30) |
 
-`imgui_state`, `imgui_windows` and `imgui_wait` are read-only; the other seven are mutating and hidden
-until `AllowMutatingTools` is on.
+`imgui_state`, `imgui_windows` and `imgui_wait` are read-only; the other seven tools require mutation permission.
 
-Mechanically, each request is expanded into single-frame steps and exactly one step runs per frame from a
-`UiBuilder.Draw` hook, which is what makes a click a genuine press-then-release and what lets a position
-settle before anything is read from it. Mouse injection additionally raises `io.WantSetMousePos` for the
-duration of the job: Dalamud's Win32 backend re-enqueues the real OS cursor position every frame while
-that flag is false, which would overwrite the injected coordinate. The flag is also what makes the backend
-move the physical cursor to the injected point, so the two agree instead of fighting; each job saves and
-restores the flag, the `AppAcceptingEvents` state and the original cursor position when its last step has
-been consumed, and `moveCursor` / `restoreCursor` can turn the physical cursor movement off entirely for
-purely synthetic input.
+Input requests are divided into frame steps executed through `UiBuilder.Draw`, with presses and releases on separate frames.
+Mouse operations temporarily coordinate `io.WantSetMousePos` and restore the associated input state at completion.
+`moveCursor` and `restoreCursor` control physical cursor movement and restoration.
+Before submission, the tools wait up to two seconds for a draw frame and return an error if rendering is unavailable.
 
-Injectors also prove the frame loop is live before committing to a job: they wait up to two seconds for
-the first `UiBuilder.Draw`, and answer with a phrased "Dear ImGui did not render a frame" error if it never
-comes. Out of game that turns an idle timeout into an immediate, honest refusal.
-
-Both `imgui_windows` and `imgui_hover_grid` were verified live against a third-party plugin's window
-(Sonar): the sweep resolved its title bar, tab bar, scroll region and resize border, and an injected click
-on its title bar moved `navWindow` and `wantCaptureKeyboard` to it.
-
-### Character control (mutating, opt-in)
+### Character control (mutating)
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
@@ -464,72 +392,70 @@ on its title bar moved `navWindow` and `wantCaptureKeyboard` to it.
 All thirteen are mutating and hidden until `AllowMutatingTools` is on. Tools that need a logged-in character
 return the standard `{"available": false, "reason": "not logged in"}` otherwise.
 
-### Movement (mutating, opt-in)
+### Movement (mutating)
 
-Auto-movement follows a real navigation mesh through the [vnavmesh](https://github.com/awgil/ffxiv_navmesh)
-plugin's IPC channels; both tools refuse with a phrased error when it is not installed and loaded, because no mesh
-means no path. Reading the destination, not the walk, is the agent's job — use `get_game_objects` to pick an id or
-name first.
+Navigation uses the [vnavmesh](https://github.com/awgil/ffxiv_navmesh) IPC interface.
+The tools return an error when the required plugin is not installed or loaded.
+Use `get_game_objects` to identify a destination object before requesting movement.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `move_to_entity` | Starts auto-movement toward a game object, snapping the destination to the floor mesh first. | `gameObjectId` (required, decimal or `0x` hex), `allowFlight` |
 | `move_to_nearby_targetable_object` | Finds the closest targetable object whose name contains the given text and starts auto-movement toward it. Player characters are skipped unless `includePlayers` is set. | `name` (required), `maxDistance` (default 30), `includePlayers`, `allowFlight` |
 
-### Travel (mutating, opt-in)
+### Travel (mutating)
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `teleport_to_aetheryte` | Teleports to an unlocked aetheryte by id or by name, through `Telepo`, at the same gil cost the in-game teleport menu would charge. Names are matched loosely — case, punctuation and leading articles are ignored, and a bare zone name matches its main city aetheryte — with `territoryId` available to break a tie. | `aetheryteId`, `name`, `territoryId`, `subIndex` |
+| `teleport_to_aetheryte` | Teleports through `Telepo` to an unlocked aetheryte by ID or normalized name, at the standard in-game gil cost. Use `territoryId` to disambiguate candidates. | `aetheryteId`, `name`, `territoryId`, `subIndex` |
 
-### Chat and plugin management (mutating, opt-in)
+### Chat and plugin management (mutating)
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `send_chat` | Sends a chat line through the game's own chat-box entry processor. Channels: `say`, `yell`, `shout`, `party`, `alliance`, `fc`, `tell` (requires `target`), `echo`. The message is UTF-8 encoded with a 500-byte cap enforced before it reaches the game. | `message` (required), `channel` (default `say`), `target` |
 | `manage_plugin` | Loads, unloads, reloads, or reports on third-party plugins through their chat commands. `reload` disables then re-loads after a short delay. Plugin names are restricted to letters, digits and `._-`; DLL paths must be absolute, exist, and end in `.dll`. Managing this plugin itself is refused. | `action` (required: `load`/`unload`/`reload`/`all`), `pluginName`, `filePath` |
-| `slash_command` | Runs any game or plugin slash command exactly as if it had been typed into the chat box, e.g. `/duty finder`, `/target`, `/pcmd move`, `/vnav moveto`. The command is first offered to Dalamud's command manager, so game and plugin commands resolve the same way they do for a user; only if that declines is it submitted through the chat box. Use `send_chat` for ordinary chat and this for commands. | `command` (required, must start with `/`, max 500 UTF-8 bytes) |
+| `slash_command` | Executes a game or plugin slash command through the Dalamud command manager, falling back to chat-box submission if unhandled. Use `send_chat` for ordinary messages. | `command` (required, must start with `/`, max 500 UTF-8 bytes) |
 
 ### Plugin bridge (IPC)
 
-Lets the agent talk to other plugins and receive pushed data from them, over Dalamud's standard IPC.
+These tools access declared endpoints and receive pushed data through Dalamud IPC.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `query_push_data` | Reads entries another plugin pushed to this plugin's `PushData` channel (a 2000-entry ring buffer), newest first, optionally filtered by key. | `key`, `count` (default 50) |
 | `register_ipc_endpoint` | Declares that another plugin exposes a callable endpoint, persisted in the config across restarts. | `pluginName`, `methodName`, `signature` (required: `Func<bool>`, `Func<string>`, `Func<int, string>`, `Action<bool>`, `Func<bool, string>`), `description` |
-| `call_plugin_ipc` | Invokes a previously registered endpoint. `Func<bool>`/`Func<string>` take no arguments; the others require `arguments.value`. Calling an unregistered endpoint is an explicit error, not a guess. | `pluginName`, `methodName`, `arguments` |
+| `call_plugin_ipc` | Invokes a registered endpoint with mutation permission. `Func<bool>` and `Func<string>` take no argument; other signatures require an integer or boolean `value` without coercion. Unregistered endpoints are rejected. | `pluginName`, `methodName`, `value` |
 | `list_ipc_endpoints` | Registered endpoints, optionally filtered by plugin. | `pluginName` |
 | `plugin_data_subscribe` | Retains the payloads a plugin pushes over the push channel under one key, in a dedicated queue that `plugin_data_poll` drains incrementally. Payloads that arrive while nothing is subscribed are visible only through `query_push_data` and are lost to the rolling buffer once it wraps. | `key` (required), `capacity` (16-10000, default 1000) |
 | `plugin_data_poll` | Drains retained payloads for a subscribed key, oldest first. Drained entries are removed, so each payload is delivered once; the rest stay for the next poll. Reports `no_data` when the queue is empty. | `key` (required), `maxItems` (1-10000, default 200) |
 | `plugin_data_unsubscribe` | Stops retaining payloads for a key and discards anything still queued for it. | `key` (required) |
 
-Only `register_ipc_endpoint` is mutating; reading pushed data, managing subscriptions, invoking a registered call,
-and listing endpoints are read-only.
+`register_ipc_endpoint` and `call_plugin_ipc` are mutating tools.
+Push-data reads, subscription management and endpoint-list queries use the read-only classification;
+that classification does not imply that local queues or configuration remain unchanged.
 
 ### Event collector
 
-A background collector ticks with the framework and records game-state changes into a 2000-entry ring buffer, so an
-agent can poll "what changed since last time" instead of re-reading full state every turn. Events: `hp_change`,
-`mp_change`, `gp_change`, `player_move`, `job_change`, `target_change`, `focus_target_change`, `target_hp_change`,
-`combat_damage`, `combat_start`, `combat_end`, `map_change`, `mount_change`, `duty_update`, `fate_update`,
-`nearby_enemy`, `nearby_player`. The first frame after login establishes a baseline and emits nothing, and
-per-type throttling (default 500 ms) keeps the buffer calm.
+The collector records state changes during framework updates in a 2000-entry ring buffer.
+Supported events are `hp_change`, `mp_change`, `gp_change`, `player_move`, `job_change`, `target_change`,
+`focus_target_change`, `target_hp_change`, `combat_damage`, `combat_start`, `combat_end`, `map_change`,
+`mount_change`, `duty_update`, `fate_update`, `nearby_enemy` and `nearby_player`.
+The first frame after login establishes a baseline. Events are throttled per type, with a default interval of 500 ms.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `query_events` | Buffered events, newest first, optionally filtered by type and timestamp window. | `types`, `count` (default 50, max 500), `since`, `before` (epoch ms) |
 | `configure_event_collection` | Updates what the collector records (player stats, target stats, object ranges, combat/system events, throttle), validated then persisted. Omitted fields keep their current value. | `config` (partial) |
 | `get_event_config` | The current collection configuration and buffer occupancy. | none |
-| `events_wait` | Blocks until a matching event is recorded, or the timeout elapses, then returns the new events oldest first. Pass `afterId` from a previous reply's `lastId` to wait for something newer; `timedOut=true` means nothing arrived in time. This is the one tool that does not run on the framework thread — a wait that occupied it would stall the client. | `afterId`, `types`, `count` (1-500, default 100), `timeoutMs` (1-30000, default 10000) |
+| `events_wait` | Asynchronously waits for matching events or timeout and returns them oldest first. Use the previous response's `lastId` as `afterId`; `timedOut=true` indicates that no matching events were returned during the wait. | `afterId`, `types`, `count` (1-500, default 100), `timeoutMs` (1-30000, default 10000) |
 
-All four are read-only — the collector only observes.
+All four tools use the read-only classification; `configure_event_collection` changes local collection settings.
 
 ### Chat log
 
-Chat lines the client receives are captured into a 1000-entry ring buffer as they arrive, so an agent can read what
-was said instead of scraping the screen. Lines carry the channel (`XivChatType` name), sender, message, relation
-kinds and both timestamps.
+Received chat messages are stored in a 1000-entry ring buffer.
+Each entry includes the channel (`XivChatType`), sender, message, relation types and timestamps.
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
@@ -540,7 +466,7 @@ kinds and both timestamps.
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `get_quest_status` | Reports whether a quest is accepted or complete and which sequence step it is on, looked up by id or by (partial) name. Name lookups search every installed client language, so a quest can be found by its English name on a non-English client. | `questId`, `query`, `maxResults` (1-20, default 8) |
-| `get_available_quests` | Lists quests currently offered in the world but not yet accepted, with map-marker position, level and objective id — read from the game's own unaccepted-quest marker list. | `nameContains`, `maxResults` (1-20, default 8) |
+| `get_available_quests` | Reads the client's unaccepted-quest markers and returns currently visible quests with map position, level and objective ID. | `nameContains`, `maxResults` (1-20, default 8) |
 
 ### Screen capture
 
@@ -558,335 +484,107 @@ kinds and both timestamps.
 
 ## Safety model
 
-**Read-only by default.** 65 of the 108 tools read state; none writes it. The mutating gate is enforced, and the 43
-tools registered behind it — action casting, targeting and movement, chat, plugin management, addon-window control,
-Dear ImGui input injection and the IPC endpoint registry — stay invisible until `AllowMutatingTools` is turned on.
+**Tool permissions.** Mutating tools require `AllowMutatingTools` and are checked during discovery and invocation.
+The read-only classification describes the server's permission policy; some tools update local collection settings,
+subscriptions or buffers. IPC invocation is classified as mutating because the provider can change game or plugin state.
 
-**Loopback only.** The listener binds `IPAddress.Loopback` (`127.0.0.1`) directly with a `TcpListener`, not
-`HttpListener`. That avoids the HTTP.SYS URL-ACL requirement — no elevation and no `netsh` reservation is needed —
-and means the server is never reachable from the network. Do not expose the port through a proxy or port-forward;
-the server has no TLS and no protection against that.
+**Network binding.** The listener binds to `IPAddress.Loopback` (`127.0.0.1`) using `TcpListener`.
+It does not require HTTP.SYS URL reservations or elevated privileges. Remote access is not enabled by this binding.
+The server does not provide TLS or a remote-access security model; the endpoint is intended for local use.
 
-**The auth token is the only access control.** Within a loopback binding, any local process can reach the port, so
-if the token is empty you are trusting every program on the machine. Set one if that matters. The gate covers every
-endpoint that returns data or acts on the game; the only exceptions are `OPTIONS` (CORS preflight) and `GET /` (a
-fixed transport advertisement naming the URLs, with no game data and nothing that varies with your configuration),
-which are answered without it by design. Everything else, including `/health` and `/tools`, requires the bearer
-header when a token is set.
+**Authentication.** A configured token is required for all endpoints except `OPTIONS` and `GET /`.
+Without a token, other local processes can access the listener. Tool permissions and authentication are independent controls.
 
-**Raw memory reads cannot crash the client.** An agent can ask for an arbitrary address, and a bad pointer
-dereference inside the game process would be an access violation that takes the whole client down. Before any
-read, `MemoryProbe` calls `VirtualQuery` and refuses unless the page is committed and readable:
+**Memory access.** `MemoryProbe` checks page state and protection with `VirtualQuery`, bounds reads to readable regions,
+and copies data through `ReadProcessMemory(GetCurrentProcess())`.
+These checks reject invalid reads but do not guarantee the safety of every native operation or compatibility with future client layouts.
 
-```csharp
-var readable = mbi.State == MemCommit && (protect & PageNoAccess) == 0 && (protect & PageGuard) == 0;
-```
-
-Reads are then clamped to the end of the region, so a request that runs off the edge returns the readable part
-instead of faulting, and the copy itself goes through `ReadProcessMemory` against `GetCurrentProcess()`. Unreadable
-addresses produce a normal tool error describing the problem.
-
-**Every tool call runs on the framework thread.** Game memory is only stable while the client's update loop is
-running, so `GameThread` marshals each handler onto it via `IFramework.RunOnFrameworkThread`. A bounded timeout
-prevents a wedged or zoning client from hanging an HTTP request forever; on timeout the call fails with a message
-naming the reason ("The client may be loading, zoned, or busy") rather than blocking.
+**Thread scheduling.** Synchronous game-state handlers run through `IFramework.RunOnFrameworkThread` with a bounded timeout.
+Asynchronous handlers, including event waits and screenshot capture, manage their own scheduling to avoid blocking the framework thread.
+A timeout limits request waiting; it does not guarantee cancellation of native work already submitted.
 
 ## Architecture
 
-The path of one tool call:
-
-```
+```text
 MCP client
-  -> POST http://127.0.0.1:18777/mcp        (JSON-RPC 2.0 over HTTP)
-  -> MiniHttp         parses HTTP/1.1 by hand on a TcpListener; no HTTP.SYS, no ASP.NET
-  -> McpServer        routes, enforces auth and session, dispatches JSON-RPC methods
-  -> GameThread       IFramework.RunOnFrameworkThread + timeout
-  -> tool handler     one of the eighteen Tool* classes, called with the JSON arguments
-  -> GameServices     Dalamud services (IObjectTable, IPartyList, IPlayerState, IDataManager, ...)
-     + FFXIVClientStructs   direct reads of the client's own structures
-  -> JSON result       serialized back as MCP text content
+  -> MiniHttp           HTTP/1.1 transport over TcpListener
+  -> McpServer          JSON-RPC routing, authentication and sessions
+  -> ToolRegistry       Tool lookup, schemas and mutation permissions
+  -> GameThread         Synchronous game-state access on the framework thread
+     or async handler   Event waits and render capture with explicit scheduling
+  -> Dalamud services / FFXIVClientStructs / IPC
+  -> MCP result         Text content and, where requested, native image content
 ```
 
-`MiniHttp` and `McpServer` have no Dalamud dependency, which is what lets the smoke test compile and drive them
-outside the game. Everything above `GameThread` is transport and protocol; everything below it needs a live client.
-
-Registration is explicit rather than reflection-based. `Plugin` builds the object graph and calls `Register` on
-each tool class against a shared `ToolRegistry` — client, objects, game data, raw memory, structs, UI, inventory,
-buddies, control, chat, plugin bridge and events — whose `AllowMutating` delegate reads
-`Configuration.AllowMutatingTools`, so the gate is evaluated per call rather than cached at startup.
+`MiniHttp` and `McpServer` are independent of Dalamud and can be tested in an offline host.
+`Plugin` constructs the service dependencies and registers each tool group explicitly.
+The registry reads `Configuration.AllowMutatingTools` when evaluating permissions, so configuration changes apply without plugin reload.
 
 ### Commands
 
 | Command | Effect |
 | --- | --- |
-| `/dalamudmcp` | Open the settings window. |
+| `/dalamudmcp` | Open plugin settings. |
 | `/dalamudmcp start` / `stop` / `restart` | Control the listener. |
-| `/dalamudmcp status` | Report running state and the endpoint. |
-| `/dalamudmcp port <1024-65535>` | Change the port and restart if running. |
-| `/dalamudmcp tools` | Print every registered tool name. |
+| `/dalamudmcp status` | Report listener status and the endpoint. |
+| `/dalamudmcp port <1024-65535>` | Change the port and restart an active listener. |
+| `/dalamudmcp tools` | List registered tool names. |
 
 ## Verification
 
-The suites below run without a game client and exercise the shipped artifacts rather than a reimplementation.
-They all share one design seam: `src\DalamudMCP\Mcp\McpServer.cs`, `MiniHttp.cs`, `ToolRegistry.cs` and `Json.cs`
-deliberately have no Dalamud dependency, so they can be compiled into a host and driven over real loopback HTTP.
+The repository includes offline checks for protocol behavior, plugin loading, native data access and image encoding.
+Several suites require a local Dalamud installation and previously built plugin or bridge binaries.
 
-| Suite | Result | Covers |
-| --- | --- | --- |
-| `tests\ProtocolSmokeTest` | `47/47` | Transport and protocol against the real sources. |
-| `tests\BridgeSmokeTest` | `22/22` | The stdio bridge against the real server. |
-| `tests\LoadabilityCheck` | `110/110` | The built DLL and the manifest generated from the csproj, plus the offset and localization audits. |
-| `tests\PluginLoadTest` | `99/99` (`93/93` without game data) | The shipped `Plugin` constructor executed out of game. |
-| `tests\McpInterop` | `12/12`, `2/2`, `11/11` | The official MCP SDK as an independent client, plus meta-schema validation. |
+| Suite | Coverage |
+| --- | --- |
+| `tests/ProtocolSmokeTest` | HTTP transport, sessions, authentication, tool permissions, concurrency and MCP result encoding. |
+| `tests/BridgeSmokeTest` | stdio transport, session forwarding, authentication and subprocess lifecycle. |
+| `tests/LoadabilityCheck` | Generated manifest, service resolution, structure offsets and localization keys. |
+| `tests/PluginLoadTest` | Plugin construction, tool registration, schemas and HTTP invocation with offline services. |
+| `tests/McpInterop` | Interoperability with the official TypeScript MCP SDK and JSON Schema validation. |
+| `tests/NativeUiReadTest`, `tests/AddonGeometryTest`, `tests/StatusSlotTest` | Guarded native UI reads, geometry and sparse status slots. |
+| `tests/IpcArgumentTest`, `tests/SignatureScanTest`, `tests/BuildIdentityTest` | IPC argument validation, signature-scan bounds and build identity. |
+| `tests/ScreenshotTest` | Screenshot bounds, pixel conversion, PNG encoding and capture-session behavior. |
+
+`McpInterop` also requires Node.js and npm. Inspect its output to distinguish completed checks from dependency-related skips.
+
+Run commands from the repository root. Build the plugin and bridge before running suites that load their binaries:
 
 ```powershell
-cd <repo>\tests\ProtocolSmokeTest;   dotnet run --project ProtocolSmokeTest.csproj -p:Platform=x64
-cd <repo>\tests\BridgeSmokeTest;     dotnet run --project BridgeSmokeTest.csproj -p:Platform=x64
-cd <repo>\tests\LoadabilityCheck;    dotnet run --project LoadabilityCheck.csproj
-cd <repo>\tests\PluginLoadTest;      dotnet run --project PluginLoadTest.csproj -p:Platform=x64
+dotnet build src\DalamudMCP\DalamudMCP.csproj -c Debug -p:Platform=x64
+dotnet build bridge\DalamudMcpBridge\DalamudMcpBridge.csproj -c Release
+dotnet run --project tests\ProtocolSmokeTest\ProtocolSmokeTest.csproj -p:Platform=x64
+dotnet run --project tests\BridgeSmokeTest\BridgeSmokeTest.csproj -p:Platform=x64
+dotnet run --project tests\LoadabilityCheck\LoadabilityCheck.csproj
+dotnet run --project tests\PluginLoadTest\PluginLoadTest.csproj -p:Platform=x64
+dotnet run --project tests\ScreenshotTest\ScreenshotTest.csproj
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests\McpInterop\run-interop.ps1
 ```
 
-Build the plugin and the bridge before running the suites that consume them: `LoadabilityCheck` and
-`PluginLoadTest` look for `src\DalamudMCP\bin\x64\Debug\DalamudMCP.dll`, and `BridgeSmokeTest` looks for the newest
-`dalamud-mcp-bridge.exe` under `bridge\DalamudMcpBridge\bin`.
+Offline passes establish the assertions implemented by each suite, not complete game-side behavior.
+`PluginLoadTest` uses offline service substitutes and can read local game data when available.
+Its constructor sweep does not reproduce every runtime dependency or UI state.
 
-### Protocol and transport
-
-`tests\ProtocolSmokeTest` starts the server on an ephemeral port and drives it over real loopback HTTP. It covers
-the `initialize` handshake and the negotiated protocol version, `tools/list` with schemas and annotations,
-`tools/call` for success and both error paths (`ToolException` and an unexpected exception), unknown-tool and
-unknown-method rejection, the mutating-tool gate (refused while closed, revealed and allowed once opened), auth
-both on and off (bearer header and `?token=` query), refusal of a `POST /mcp` with no session, 24 concurrent calls
-each returning their own result, the opt-in request log, and clean start/stop/restart behaviour.
-
-`tests\BridgeSmokeTest` hosts the real `McpServer` in-process, launches the built `dalamud-mcp-bridge.exe` as a
-child process, and speaks newline-delimited JSON-RPC to its stdin. It covers the handshake and session capture,
-notification suppression, `tools/list`, argument and error round trips, survival of a malformed line, five
-pipelined requests each getting their own id, and a clean exit on stdin EOF. It also runs the bridge twice more
-against a server whose token gate is switched on: once **without** `--token` (the bridge must refuse to start and
-say the token is missing) and once **with** it.
-
-`tests\McpInterop` drives the real server with the **official** MCP SDK (`@modelcontextprotocol/sdk`, the
-TypeScript implementation, pinned at `1.30.1`) rather than hand-written JSON-RPC, so the framing is judged by an
-independent implementation. The official client completes `initialize`, reads back the server's identity, parses
-`tools/list`, round-trips a tool call, receives a tool error as `isError` rather than a transport failure, and
-keeps working afterwards. Its fourth phase validates all 106 **shipped** schemas — `PluginLoadTest` dumps every
-page of its `tools/list` payload when `DALAMUD_MCP_DUMP_TOOLS` is set, and that payload is run through the SDK's declared
-`ToolSchema` and then compiled against the JSON Schema 2020-12 meta-schema using the `ajv` bundled inside the SDK.
-
-Two findings are worth recording, since both are cases where a check had to be strengthened before it meant
-anything:
-
-- The SDK's own `ToolSchema` validation is too lenient to catch this project's defect class: it types
-  `inputSchema` as an object with a `"type"` of `"object"` and a `properties` record whose values are only checked
-  to be *objects*, never that a property's `type` is one of JSON Schema's legal names. Re-injecting the original
-  `{"type":"array of integer"}` defect into the real 106-tool payload still passed it. The label therefore says
-  only what it proves, and the ajv meta-schema pass — added alongside it — rejects the defect with an independent
-  message: `type must be JSONType or JSONType[]: array of integer`.
-- `negative.mjs` points the official client at a deliberately non-conforming server and requires it to fail. It
-  once passed for the wrong reason: the host had bound an ephemeral port in the WHATWG list of ports Node's
-  `fetch` refuses before connecting (`1719`), so `fetch failed` was being scored as a protocol rejection. The host
-  now re-binds until it lands outside the blocked list, `interop.mjs` refuses such a port with a diagnosis, and
-  the control asserts the *reason* — a `ZodError` naming a JSON-RPC field — rather than any failure.
-  `validate-real-tools.mjs` carries the same self-check: it re-injects the original defect into the real payload
-  and fails if the meta-schema no longer rejects it.
-
-`tests\ProtocolSmokeTest` contains one further control worth noting: this host does not report a dead loopback port
-consistently — a started, stopped and never-connected `TcpListener` alternates between `ConnectionRefused` and a
-connect that hangs until it times out. The probe therefore classifies refused / hung / accepted, asserts that the
-stopped port is **not accepting**, and probes the *live* port first to confirm the probe can see a listener.
-
-### Load path and constructibility
-
-`tests\LoadabilityCheck` inspects the built plugin DLL and manifest for the failure modes that are invisible at
-compile time but present in-game only as "plugin failed to load" with no useful detail: a malformed or incomplete
-manifest, a `DalamudApiLevel` that does not match the installed Dalamud (which Dalamud refuses silently), a
-`Plugin` constructor parameter whose type is not a Dalamud service type, and a duplicate tool name
-(`ToolRegistry.Add` throws on a repeat, and registration happens inside the `Plugin` constructor). It loads the
-plugin assembly directly and compares it against Dalamud's own type tables, linking no source, so it validates the
-shipped binary rather than the sources.
-
-The same suite settles the dependency-injection question using Dalamud's own container code rather than a copy of
-it. `RegisterInterfaces` is pure attribute reflection and `ValidateCtor` never dereferences a service instance — it
-reads only the *types* in `instances` plus `[ScopedService]` attributes — so the test builds a real
-`ServiceContainer`, calls `RegisterInterfaces` for every concrete `IServiceType` exactly as
-`InitializeEarlyLoadableServices` does, installs one singleton key per non-scoped service
-(`Task.FromResult<T>(null)` is sufficient, since only the key's type is ever inspected), hands it a
-`DalamudPluginInterface` stand-in as the scoped object, and invokes Dalamud's own private `FindApplicableCtor`. The
-verdict is Dalamud's, not this project's reimplementation of the rule, and it confirms that all twenty-three
-constructor parameters resolve. Four controls guard the result — a type the probe must refuse, a resolvable
-constructor it must accept, a rebuild that withholds the singleton keys and asserts the same constructor is then
-refused, and a check that the verdict depends on the services Dalamud registers.
-
-**Offset audit.** The direct-struct tools (`get_job_gauge`, `get_active_statuses`) read game memory through
-hand-copied field offsets from FFXIVClientStructs, and a library update that moves a field would not throw — it
-would silently read another member's bytes. The test therefore re-derives every declared constant from the
-installed `FFXIVClientStructs.dll` itself (attribute offsets rather than `Marshal.OffsetOf`, because these types
-carry pointer members `Marshal` cannot lay out): `BattleChara.StatusManager` at +9136, `StatusManager`'s owner,
-entry array, special-status timer, valid-status count (+984) and extra-flags byte (+985), its `StructSize` (992),
-`GameObject.ObjectKind` (+144), and `JobGaugeManager`'s `ClassJobId` (+88) and gauge union (+8, with every union
-member verified to share that one offset). It also cross-checks the `ClassJobId` → gauge-struct table: every
-concrete gauge struct the library ships is covered, none is invented, and the covered job ids are exactly the 21
-combat jobs known to have dedicated gauges. A FFXIVClientStructs update now fails here, by name, instead of
-corrupting a read in game.
-
-**Localization audit.** Both language tables in `Localization.cs` are checked for key parity — every key must
-resolve in both, so a string added to English but forgotten in Chinese (or vice versa) fails the suite instead of
-silently showing English to one language's users forever.
-
-`tests\PluginLoadTest` goes further and runs the shipped `Plugin` constructor out of game. It loads `DalamudMCP.dll`
-by path and instantiates `DalamudMCP.Plugin` with the twenty-three Dalamud services it asks for, each synthesized by
-`DispatchProxy`, then speaks MCP to the listener over real TCP. That exercises the actual load path end to end:
-config load and `Sanitize`, construction of the service graph, all eighteen tool sets registering into the real
-registry, the ImGui window construction, the `UiBuilder.Draw` / `OpenConfigUi` subscriptions, the `/dalamudmcp`
-command registration, the HTTP listener binding the configured port, handlers running through `GameThread` and
-returning well-formed JSON, and a clean `Dispose` that unsubscribes both events, removes the command and stops the
-listener. During that run every registered tool was swept with no arguments, and every handler either returned a
-payload or answered with a deliberate, phrased error (not-logged-in, missing required parameter) rather than
-escaping an exception.
-
-Three config settings are asserted through the shipped plugin rather than against a hand-built server: the request
-log (`LogRequests`), the bearer token (`AuthToken`) and the port. The first two are set on the config instance after
-the plugin is constructed, which also proves the plugin reads them per request instead of snapshotting them at
-startup — that is what makes toggling them in the settings window take effect without a plugin reload.
-
-The `/dalamudmcp` chat command is run, not merely checked for registration. `CommandInfo.Handler` is a public
-property, so the test pulls the real handler delegate back out and invokes it exactly as Dalamud would, which means
-`status`, `stop`, `start`, an unknown subcommand, `port <n>` and an out-of-range `port` are all exercised against
-the live listener and the live config. The consequences are asserted rather than the output: stopping must actually
-stop serving, starting must serve MCP again, `port <n>` must move the listener at once (releasing the old port and
-persisting the setting), and an out-of-range port must be refused **without** changing anything.
-
-The memory tools are verified against real memory here too. `MemoryProbe` reads the current process via
-`ReadProcessMemory(GetCurrentProcess(), ...)`, and the load test hosts the plugin in its own process, so it can pin
-a known byte pattern and assert the tool returns exactly those bytes back. The safety guard is checked by reading
-address `0x1` and requiring a phrased refusal. Every one of the 106 shipped tool schemas is validated from
-`tools/list` over the real socket: each `inputSchema` must be a JSON object with an object `properties`, every
-property must carry a `type` that is one of JSON Schema's seven legal names, every `array` must say what its `items`
-are, and every name in `required` must actually be declared. The same section cross-checks schema against
-behaviour: each handler's own "missing required parameter: X" message is captured during the sweep and compared
-against the `required` list for the 8 handlers that demand exactly one parameter. Handlers that accept a *choice*
-of arguments (`"provide itemId or name"`) are deliberately not cross-checked, since no single parameter is missing
-in those cases.
-
-That check immediately found a real defect: `read_pointer_chain` advertised its `offsets` parameter as
-`{ "type": "array of integer" }`, which is not a legal JSON Schema type and carried no `items`, so a strict client
-or a generated binding would reject the whole tool. The call-site spelling is kept (it reads better in C#) and
-`Json.ApplyType` now expands it to `{"type":"array","items":{"type":"integer"}}` on the wire. A second defect sat
-in the same parameter's description, which read `e.g. [0x10, 0x1C0]`; JSON has no hex literals, so the schema was
-teaching a malformed request. The description now shows valid JSON and the type is the legal union
-`{"type":"array","items":{"type":["integer","string"]}}`, because the handler genuinely accepts both forms
-(`src\DalamudMCP\Tools\MemoryTools.cs:687` `ParseOffset` takes `0x`-prefixed strings, bare hex-digit strings and
-decimals). The test suite calls `read_pointer_chain` with `["0x10"]` and asserts the hexdump *starts* at the
-marker, with the pointer deliberately stored 16 bytes short of it, so a decoder that read `"0x10"` as decimal 10
-would land 6 bytes early and be caught.
-
-### Real game data
-
-Twenty-two of the twenty-three services in `PluginLoadTest` are inert `DispatchProxy` stubs. The data manager is
-not, because a stub cannot be made to work there: `DispatchProxy` does not copy a method's generic parameter
-constraints into the override it generates, so an override of
-`ExcelSheet<T> GetExcelSheet<T>() where T : struct, IExcelRow<T>` fails inside the generated method body with
-`TypeLoadException: GenericArguments[0], 'T', on 'Lumina.Excel.ExcelSheet`1[T]' violates the constraint of type
-parameter 'T'` before the handler is reached. With an inert proxy, every tool reaching sheet data would report a
-`TypeLoadException` regardless of whether the plugin was correct.
-
-`tests\PluginLoadTest\RealDataManager.cs` addresses this with `Reflection.Emit`, which does copy the constraints.
-It emits a type implementing `Dalamud.Plugin.Services.IDataManager` and — when the local game install is found —
-constructs it against that install's `sqpack` files through Lumina, which reads them directly with **no game
-process running**. The sheet tools are therefore exercised against real game data, and the suite asserts that no
-sheet-reading tool escapes an exception:
-
-```
-  [note] data manager is REAL, reading C:\Program Files\上海数龙科技有限公司\最终幻想XIV\game\sqpack
-  [note] Item row 1 read through the emitted manager: 金币
-```
-
-The sqpack directory is located by, in order: the `DALAMUD_MCP_SQPACK` environment variable, four well-known
-install paths, then the `Lumina is ready: <path>` line in `dalamud.log` (the most reliable signal, since it is
-what the launcher actually resolved). If none is found the test says so and falls back to the inert proxy rather
-than failing — the protocol checks still run, and the real-data checks are skipped.
-
-### Live verification
-
-The following describes the initial live session. Later UI/developer-loader tests are documented in
-[development tools](docs/addon-probes-and-dev-loader.md), and the [2026-10-17 audit](docs/tool-audit-2026-10-17.md)
-records subsequent fixes and coverage limits.
-
-Initial in-game verification used this machine and a live client. All 33 read-only tools that
-existed at that point were called over the real endpoint (`http://127.0.0.1:18777/mcp`) with FFXIV running and a
-character logged in, and every one returned real game data (or the correct "empty" answer for genuinely empty
-state — solo party, no FATEs, no targets, idle gauge). Highlights: `get_local_player` returned the live character
-(name, level 100, job, HP/MP, world, position); `get_game_objects` enumerated the player, a minion and training
-dummies with distances; `get_job_gauge` decoded `BardGauge` live; `get_active_statuses` located a `StatusManager`
-at exactly the audited +9136 offset for both the player and a dummy; `read_object_memory` at +144 returned the
-expected `ObjectKind` bytes; every Excel tool answered from the client's own data (CN locale — 火之碎晶, 吟游诗人,
-强化药); `read_memory` at the module base returned the `MZ` header; `scan_signature` found real matches; and
-`get_module_info` reported the real client module.
-
-That session also caught three defects the offline suites could not see, each fixed and re-verified in game by
-rebuilding and letting Dalamud's dev-plugin auto-reload pick up the new DLL:
-
-1. `get_job_gauge` threw `ArgumentException` inside `Enum.GetName`, because the JSON-side `JValue` box was passed
-   where a real CLR box of the enum's underlying type is required. A separate `BoxClr` helper now builds the true
-   boxed value for reflection, and `Box` keeps producing `JValue` for JSON.
-2. `get_game_data_sheet_info` crashed with `Could not determine JSON object type for type
-   System.Reflection.RuntimePropertyInfo` — the `textColumns` list serialized raw `PropertyInfo` objects. It now
-   emits property **names**.
-3. `get_game_data_row` always read row 0: the reflection buffer passed to `TryGetRow` never boxed the requested
-   row id, and on .NET 10 `MethodInfo.Invoke` silently converts a `null` argument for a `uint` parameter into `0`
-   instead of throwing. The id is now boxed explicitly.
+The [2026-10-17 audit](docs/tool-audit-2026-10-17.md) records 62 distinct tools observed in a live session,
+including contextual refusals and no-ops. [Screenshot verification](docs/screenshots.md) covers the later render-capture implementation.
+The [addon and development-loader guide](docs/addon-probes-and-dev-loader.md) documents the relevant UI and loader checks.
+These records describe specific builds and scenarios; test counts are not a compatibility guarantee.
 
 ## Limitations
 
-The coverage notes below describe the initial verification baseline; later observations and remaining gaps are
-recorded in the [2026-10-17 audit](docs/tool-audit-2026-10-17.md). Neither that audit nor offline passes certify
-every tool in every client context.
-
-Verified before that session and still standing: the plugin project builds clean for x64 against Dalamud API level
-15 with the assemblies from a real install (`0 errors, 0 warnings`); the five suites pass with the results listed
-in [Verification](#verification); and the plugin DLL and manifest are produced in the build output against the
-correct Dalamud and FFXIVClientStructs assemblies.
-
-Not verified, and therefore not claimed:
-
-- In-game behaviour beyond the single verification session described above — one machine, one client build, one
-  logged-in character in one zone. Other locales, other jobs' gauges beyond Bard, combat in progress, parties,
-  dungeons and GPose were not exercised.
-- That the offsets match a **future** game client build. They match the client that ran during verification.
-- Long-session behaviour, such as memory growth in the session store or the listener surviving many hours of
-  polling.
-
-**Other limitations:**
-
-- `tests\LoadabilityCheck` and `tests\PluginLoadTest` locate the repository by walking up from their own binary (or
-  honor a `DALAMUD_MCP_REPO` environment variable) and read Dalamud assemblies from
-  `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`, so they only run as-is on a CN-launcher machine. With the global
-  launcher they exit non-zero.
-- The request log records the method, tool name, outcome and elapsed time — deliberately not argument bodies or
-  result payloads, so it will not tell you *what* was passed to a call. Raw memory reads are logged by name only.
-- The plugin itself has no stdio transport; HTTP-capable clients connect directly and stdio-only clients go
-  through `bridge\DalamudMcpBridge`.
-- The mutating tools (control, chat, plugin management, addon windows, movement, teleport, screen capture, IPC
-  endpoint registration) were exercised only out of game, where every handler answered with the expected
-  deliberate error (not-logged-in or a refused parameter). Their in-game behaviour has not been verified, and the
-  event collector, chat-log capture and IPC bridge have not run against a live client at all.
-- The tools added after the verification session — `capture_game_screenshot`, `teleport_to_aetheryte`,
-  `move_to_entity`, `move_to_nearby_targetable_object`, `get_chat_log`, `events_wait`, `slash_command`,
-  `use_duty_action`, `get_quest_status`, `get_available_quests`, `plugin_data_subscribe`, `plugin_data_poll`,
-  `plugin_data_unsubscribe`, `plugin_list`, `plugin_describe`, `get_addon_strings` and `select_addon_menu_item` —
-  are covered by the offline suites (schema validation, the live-socket sweep and the loadability check) but have
-  **not** been driven against a running game client. Their argument contract, error text and JSON shape are
-  tested; their effects on the game are not.
-- `move_to_entity` and `move_to_nearby_targetable_object` additionally depend on the third-party
-  [vnavmesh](https://github.com/awgil/ffxiv_navmesh) plugin being installed and loaded; without it they return a
-  phrased error rather than a partial path. That IPC handshake has not been exercised against a live vnavmesh
-  build here.
-- `capture_game_screenshot` returns the PNG base64-encoded inside the JSON-RPC result, so a full-resolution capture
-  is a large response; `maxDimension` (default 1920) is the control for that, and `save=true` writes the file to
-  disk too; combine it with `includeImage=false` for a path-only response. `imageContent=true` returns native MCP image content instead of base64 text.
-- `get_game_objects` and similar enumeration tools read the whole object table and filter in memory, which is fine
-  at normal object counts but not designed for tight polling loops.
-- Published `latest.zip` packages are distributed through [NiGuangOwO's plugin repository](https://github.com/NiGuangOwO/DalamudPlugins); `.github\workflows\build.yml` uploads CI build artifacts separately.
-- The session store keeps sessions in memory with a 2-hour idle cutoff, so a long-idle client must re-initialize.
+- Game-memory layouts, signatures and native UI behavior depend on the client and Dalamud versions.
+  Future updates may require changes to structure mappings or tool implementations.
+- Live validation covers selected scenarios. External IPC effects, navigation, plugin lifecycle operations,
+  combat, duties and other UI contexts require separate validation for the intended workflow.
+- Navigation requires [vnavmesh](https://github.com/awgil/ffxiv_navmesh) to be installed and loaded.
+  A successful dispatch does not establish that movement, a callback or another game action completed.
+- Default screenshot capture requires the game to continue rendering. A minimized client that suspends rendering
+  may time out; cached output requires explicit permission and is marked with its age. See [screenshot behavior](docs/screenshots.md).
+- Full-resolution image responses can be large. Use `maxDimension`, native image content or path-only output as appropriate.
+- Object queries read the object table before filtering. Event collection is preferable to frequent full-state polling where applicable.
+- Sessions are stored in memory and expire after two idle hours. Clients must reinitialize after expiry or plugin reload.
+  Long-duration memory use and listener stability are not fully characterized.
+- Request logs contain method, tool name, outcome and duration; they omit argument and result payloads.
+- `LoadabilityCheck` and `PluginLoadTest` currently resolve Dalamud assemblies from
+  `%APPDATA%\XIVLauncherCN\addon\Hooks\dev`. Other environments require the corresponding test-path adjustments.
+- The plugin provides HTTP transport. stdio-only clients require the bridge described above.
