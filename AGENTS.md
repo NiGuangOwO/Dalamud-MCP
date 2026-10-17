@@ -9,3 +9,9 @@ For changes to this server, build `src/DalamudMCP/DalamudMCP.csproj` in Debug an
 If a task needs a missing capability, first check the complete catalog and mutation gate. When MCP development is in scope, implement a bounded reusable tool, verify it offline, verify the running build, then continue the original plugin task. Native pointer/hook failures require isolated reproduction before another live attempt; use the skill's debugging reference.
 
 User and project-specific restrictions on game input, computer use, spending, commits and pushes remain authoritative. Do not inherit another developer's authorization from an example or an audit report. Keep the skill, server instructions and tool schemas consistent when capabilities change.
+
+## Required release after plugin updates
+
+The repository owner authorizes unattended versioning and publication for each completed, validated update to the DalamudMCP plugin. A source push alone does not complete such an update: increment the plugin version, build the release package, create a GitHub Release, and publish the same package to `NiGuangOwO/DalamudPlugins`. Follow [the release procedure](docs/releasing.md), including remote index and package verification. Do not ask for publication approval again within this scope. Report failures accurately instead of treating a dispatched workflow as publication success.
+
+This requirement applies to changes shipped in the plugin, including native tools, server behavior, dependencies, assets and plugin metadata. Documentation-only edits, release bookkeeping and changes limited to another development plugin do not recursively trigger a DalamudMCP binary release. Do not start or reopen the game solely for publication; report unavailable live validation and retain completed offline evidence.
