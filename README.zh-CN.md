@@ -9,7 +9,7 @@ Dalamud MCP 是适用于 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goat
 
 插件运行于游戏进程内部，通过 Dalamud 服务和 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs)
 提供角色、游戏对象、小队、物品栏、游戏数据及界面状态访问，并支持经过校验的原始内存读取、事件采集、截图和插件间通信。
-当前工具目录包含 **108 个工具，其中 65 个只读、43 个可变更**。可变更工具需在配置中显式启用。
+当前工具目录包含 **109 个工具，其中 66 个只读、43 个可变更**。可变更工具需在配置中显式启用。
 
 默认 MCP 地址为 `http://127.0.0.1:18777/mcp`。支持 HTTP 的 MCP 客户端可直接连接；仅支持 stdio 的客户端可使用仓库附带的桥接程序。
 
@@ -227,7 +227,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-当前目录包含 108 个工具：65 个只读、43 个可变更。下表按功能列出主要工具及参数摘要；
+当前目录包含 109 个工具：66 个只读、43 个可变更。下表按功能列出主要工具及参数摘要；
 完整目录和参数约束以服务器返回的 `tools/list` schema 为准，可变更工具在 `AllowMutatingTools` 启用后开放。
 
 `SelectString` 菜单选择使用从零开始的原生选项编号，不使用 `AtkValue` 字段索引。
@@ -311,6 +311,8 @@ FFXIVClientStructs 静态地址解析器尚未初始化时，相关工具返回�
 解析器也支持尾随 `h`、下划线和十进制表示；建议使用带引号的 `0x` 格式。
 
 ### UI（含可变更操作）
+
+静态分析所需的原始派发地址可通过 `get_addon_native_dispatch` 查询，详见[原生派发说明](docs/native-dispatch.md)。
 
 | 工具 | 描述 | 关键参数 |
 | --- | --- | --- |

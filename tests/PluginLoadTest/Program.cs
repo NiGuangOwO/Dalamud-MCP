@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 108;
+    private const int ExpectedTools = 109;
 
     private static int checks;
     private static int failures;

@@ -21,6 +21,7 @@ internal sealed class AddonProbeTools : IDisposable
     public AddonProbeTools(ToolRegistry registry, GameServices svc)
     {
         this.svc = svc;
+        AddonDispatchTools.Register(registry);
         var schema = Json.Schema(
             ("addon", "string", "Exact internal name of a loaded addon, e.g. Hummer.", true),
             ("componentId", "integer", "Optional top-level component node id; scopes nodeIds to that component's UldManager.", false),

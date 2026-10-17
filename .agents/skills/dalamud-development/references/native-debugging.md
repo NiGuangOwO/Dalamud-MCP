@@ -4,6 +4,8 @@ Read the layouts from the developer's installed Dalamud and FFXIVClientStructs a
 
 ## Preserve native read boundaries
 
+For a loaded addon's original `ReceiveEvent`, use `get_addon_native_dispatch`. Dalamud may expose a managed lifecycle thunk through the current vtable; do not subtract the game's module base from that thunk. The tool returns an RVA only for an original handler in the game module. Match the offline executable and re-query current window identity before relying on it.
+
 - Use framework-thread access for game objects and UI. Resolve current identity immediately before access, and bound node counts, depth, string lengths and sample duration.
 - Validate/copy a complete native structure before using fields of an untrusted pointer. Taking `&pointer->Field` can fault before a guarded reader is called; guarding only the eventual string buffer is insufficient. A short region-clamped buffer must not be unmarshalled as a larger structure.
 - Component ULD metadata comes from `AtkUldManager.Objects` interpreted with its base type; `ComponentData` has a different layout. Validate discriminators before casting to a button, list or window.

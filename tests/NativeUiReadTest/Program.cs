@@ -117,6 +117,23 @@ unsafe class Program
                 Check(Refused(),"popup belonging to a different addon refused");
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
+            var tableType=Assembly.LoadFrom(Path.Combine(sdk,"Dalamud.dll")).GetType("Dalamud.Game.Addon.Lifecycle.AddonVirtualTable")!;
+            var table=System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(tableType);
+            var tableFlags=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance;
+            void SetPointer(string name,nint pointer){var field=tableType.GetField(name,tableFlags)!;field.SetValue(table,Pointer.Box((void*)pointer,field.FieldType));}
+            var modified=Allocate(32);var original=Allocate(32);
+            SetPointer("atkUnitBase",unit);SetPointer("<ModifiedVirtualTable>k__BackingField",modified);SetPointer("<OriginalVirtualTable>k__BackingField",original);
+            var dispatch=plugin.GetType("DalamudMCP.Tools.AddonDispatchTools")!.GetMethod("FindOriginal",BindingFlags.NonPublic|BindingFlags.Static)!;
+            nint FindOriginal(System.Collections.IEnumerable entries,nint owner,nint current)=>(nint)dispatch.Invoke(null,new object?[]{entries,owner,current})!;
+            Check(FindOriginal(new object?[]{null,"unsupported",table},unit,modified)==original,"original dispatch uses exact SDK table and matching owner/current table");
+            Check(FindOriginal(new[]{table},(nint)1,modified)==0,"unrelated addon lifecycle table refused");
+            Check(FindOriginal(new[]{table},unit,(nint)1)==0,"stale or replaced modified vtable refused");
+            Check(FindOriginal(Array.Empty<object>(),unit,modified)==0,"empty lifecycle registry returns unavailable");
+            var many=Enumerable.Repeat<object?>(null,1025).ToArray();many[1024]=table;
+            Check(FindOriginal(many,unit,modified)==0,"lifecycle table search bounded to 1024 entries");
+            many[1023]=table;Check(FindOriginal(many,unit,modified)==original,"last in-budget lifecycle table is discoverable");
+            SetPointer("<OriginalVirtualTable>k__BackingField",0);
+            Check(FindOriginal(new[]{table},unit,modified)==0,"missing original table returns unavailable without native invocation");
         }
         finally{foreach(var p in allocations)Marshal.FreeHGlobal(p);}
         var page=VirtualAlloc(0,4096,0x3000,0x04);

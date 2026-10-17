@@ -11,7 +11,7 @@ plugin development, runtime inspection and in-game validation.
 The plugin runs within the game process and exposes character, object, party, inventory, game-data and UI state
 through Dalamud services and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 It also provides validated raw-memory reads, event collection, screenshots and inter-plugin communication.
-The current catalog contains **108 tools: 65 read-only and 43 mutating**. Mutating tools require explicit enablement.
+The current catalog contains **109 tools: 66 read-only and 43 mutating**. Mutating tools require explicit enablement.
 
 The default endpoint is `http://127.0.0.1:18777/mcp`. HTTP-capable MCP clients connect directly;
 stdio-only clients use the included bridge.
@@ -238,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-The catalog contains 108 tools: 65 read-only and 43 mutating. The tables summarize the principal tools and parameters.
+The catalog contains 109 tools: 66 read-only and 43 mutating. The tables summarize the principal tools and parameters.
 The server's `tools/list` schemas define the complete catalog and argument constraints.
 Mutating tools are available only when `AllowMutatingTools` is enabled.
 
@@ -323,6 +323,8 @@ Addresses use hexadecimal strings such as `"0x7FF6A1B2C3D4"` to preserve precisi
 The parser also accepts a trailing `h`, underscores and decimal values; quoted `0x` strings are recommended.
 
 ### UI (includes mutating operations)
+
+Original handler addresses for static analysis are available through `get_addon_native_dispatch`. See [native dispatch](docs/native-dispatch.md).
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
