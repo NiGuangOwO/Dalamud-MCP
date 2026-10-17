@@ -19,6 +19,7 @@ MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 108 个工具 —�
 
 ## 目录
 
+- [从插件仓库安装](#从插件仓库安装)
 - [构建](#构建)
 - [作为开发插件安装](#作为开发插件安装)
 - [配置](#配置)
@@ -28,6 +29,28 @@ MCP 客户端连接 `http://127.0.0.1:18777/mcp` 即可调用 108 个工具 —�
 - [架构](#架构)
 - [验证](#验证)
 - [局限](#局限)
+
+## 从插件仓库安装
+
+日常使用推荐通过 [NiGuangOwO 的 Dalamud 插件仓库](https://github.com/NiGuangOwO/DalamudPlugins)安装发布版。
+自定义插件仓库地址：
+
+```text
+https://raw.githubusercontent.com/NiGuangOwO/DalamudPlugins/main/pluginmaster.json
+```
+
+1. 启用 Dalamud 后启动游戏，在聊天框输入 `/xlsettings` 打开 Dalamud 设置。
+2. 进入 `Experimental`（实验性功能），找到 `Custom Plugin Repositories`（自定义插件仓库），
+   粘贴上方地址，添加条目并保存设置。
+3. 输入 `/xlplugins` 打开插件安装器，刷新插件列表，在可安装插件中搜索 **Dalamud MCP**
+   （作者：**NiGuangOwO**）并安装。后续版本也通过该安装器更新。
+4. 输入 `/dalamudmcp status` 检查监听器状态，或输入 `/dalamudmcp` 打开插件设置。
+   默认 MCP 地址为 `http://127.0.0.1:18777/mcp`。
+
+插件端安装后，继续阅读[配置](#配置)和[连接 Agent](#连接-agent)，完成 AI 客户端接入。
+可变更工具默认关闭，任务需要时可在插件设置中开启。
+新发布的版本如果暂未出现在列表中，请等待几分钟，让 GitHub 的索引缓存刷新后再刷新安装器。
+从开发插件切换到仓库版本时，请先禁用开发版本，再启用仓库版本。
 
 ## 构建
 
@@ -86,7 +109,7 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.json
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 ```
 
-若要按插件仓库的安装方式使用，请把 `bin\x64\Release\DalamudMCP\latest.zip` 解压到一个独立目录，再把开发插件
+若要测试本地 Release 安装包，请把 `bin\x64\Release\DalamudMCP\latest.zip` 解压到一个独立目录，再把开发插件
 位置指向该目录。
 
 ### 在游戏中启用
@@ -778,5 +801,5 @@ FFXIVClientStructs 程序集。
 - `capture_game_screenshot` 把 PNG 以 base64 编码放在 JSON-RPC 结果内返回，因此全分辨率截图是一个很大的
   响应；可使用 `maxDimension` 控制大小。`save=true, includeImage=false` 只返回路径；`imageContent=true` 则返回原生 MCP 图片，避免把 base64 当正文。
 - `get_game_objects` 等枚举工具读取整张对象表后在内存中过滤，常规对象数没问题，但不适合高频轮询循环。
-- `latest.zip` 是普通的插件仓库分发包，不签名、也没有发布到任何地方；`.github\workflows\build.yml` 只把它作为 CI 产物上传。
+- 发布版 `latest.zip` 通过 [NiGuangOwO 的插件仓库](https://github.com/NiGuangOwO/DalamudPlugins)分发；`.github\workflows\build.yml` 另行上传 CI 构建产物。
 - 会话存储把会话保存在内存中，2 小时空闲即过期，长期空闲的客户端必须重新 `initialize`。

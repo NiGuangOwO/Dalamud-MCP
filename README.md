@@ -22,6 +22,7 @@ a ring buffer that an agent can poll instead of re-reading full state.
 
 ## Contents
 
+- [Install from a plugin repository](#install-from-a-plugin-repository)
 - [Build](#build)
 - [Install as a dev plugin](#install-as-a-dev-plugin)
 - [Configure](#configure)
@@ -31,6 +32,27 @@ a ring buffer that an agent can poll instead of re-reading full state.
 - [Architecture](#architecture)
 - [Verification](#verification)
 - [Limitations](#limitations)
+
+## Install from a plugin repository
+
+For normal use, install the published plugin from [NiGuangOwO's Dalamud plugin repository](https://github.com/NiGuangOwO/DalamudPlugins).
+Use this repository index URL:
+
+```text
+https://raw.githubusercontent.com/NiGuangOwO/DalamudPlugins/main/pluginmaster.json
+```
+
+1. Launch the game with Dalamud enabled, then enter `/xlsettings` in chat to open Dalamud settings.
+2. Open `Experimental`, find `Custom Plugin Repositories`, paste the URL above, add the entry and save the settings.
+3. Enter `/xlplugins` to open the Plugin Installer. Refresh the plugin list, search for **Dalamud MCP**
+   (author: **NiGuangOwO**) in the available plugins and install it. Future releases are updated through the same installer.
+4. Run `/dalamudmcp status` to check the listener, or `/dalamudmcp` to open its settings.
+   The default MCP endpoint is `http://127.0.0.1:18777/mcp`.
+
+Continue with [Configure](#configure) and [Connect an agent](#connect-an-agent) to connect your AI client.
+Mutating tools are disabled by default; enable them in the plugin settings when your task requires them.
+If a new release is missing from the list, wait a few minutes for GitHub's index cache to refresh, then refresh the installer again.
+When switching from a development installation, disable the dev copy before enabling the repository version.
 
 ## Build
 
@@ -93,7 +115,7 @@ src\DalamudMCP\bin\x64\Debug\DalamudMCP.json
 src\DalamudMCP\bin\x64\Debug\DalamudMCP.deps.json
 ```
 
-To install it the way a plugin repository would, unpack `bin\x64\Release\DalamudMCP\latest.zip` into a directory of
+To test a local Release package, unpack `bin\x64\Release\DalamudMCP\latest.zip` into a directory of
 its own and point the dev-plugin location at that directory instead.
 
 ### Activating in-game
@@ -866,5 +888,5 @@ Not verified, and therefore not claimed:
   disk too; combine it with `includeImage=false` for a path-only response. `imageContent=true` returns native MCP image content instead of base64 text.
 - `get_game_objects` and similar enumeration tools read the whole object table and filter in memory, which is fine
   at normal object counts but not designed for tight polling loops.
-- `latest.zip` is a plain plugin-repository package and is not signed or published anywhere; `.github\workflows\build.yml` only uploads it as a CI artifact.
+- Published `latest.zip` packages are distributed through [NiGuangOwO's plugin repository](https://github.com/NiGuangOwO/DalamudPlugins); `.github\workflows\build.yml` uploads CI build artifacts separately.
 - The session store keeps sessions in memory with a 2-hour idle cutoff, so a long-idle client must re-initialize.
