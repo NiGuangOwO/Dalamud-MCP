@@ -53,6 +53,8 @@ internal static class ScreenshotTools
         var hwnd = FindMainWindow();
         if (hwnd == IntPtr.Zero)
             throw new ToolException("could not locate the game window");
+        if (IsIconic(hwnd))
+            throw new ToolException("the game window is minimized; restore it before capturing a screenshot (live state tools still work)");
 
         var clientOnly = area == "client";
         Rect rect;
@@ -475,6 +477,9 @@ internal static class ScreenshotTools
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
