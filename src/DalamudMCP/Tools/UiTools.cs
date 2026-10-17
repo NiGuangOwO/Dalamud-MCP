@@ -220,18 +220,18 @@ internal static class UiTools
         registry.Add(
             "select_addon_menu_item",
             "Select an item in an addon (UI window) menu",
-            "Picks an entry from a menu-style addon (one whose options live in its AtkValue " +
-            "table) by label, and activates it by firing the addon's callback with the entry's " +
-            "index — the same call the game makes when the option is clicked. Matching is exact " +
-            "after normalization unless containsMatch is set. Pass 'index' instead of 'label' to " +
-            "select positionally. Read the candidates first with get_addon_strings. This is a " +
+            "Selects a menu entry by normalized label or index. SelectString reads its guarded native popup " +
+            "entries and sends ListItemClick through the list; index is the zero-based menu ordinal, " +
+            "NOT the label's AtkValue index. Use dryRun to inspect indexKind and the selected entry. " +
+            "Other addons retain legacy AtkValue-index callback behavior and require a known callback contract. " +
+            "Ambiguous labels are refused even with containsMatch. A dispatched input is not proof of transition. This is a " +
             "mutating tool: it is hidden from tools/list and refused by tools/call while the " +
             "plugin's allow-mutating-tools switch is off.",
             Json.Schema(
                 ("addon", "string", "Addon name whose menu to select from", false),
                 ("addonId", "integer", "Raw AtkUnitBase id (overrides addon)", false),
                 ("label", "string", "Menu entry label to select (required unless index is given)", false),
-                ("index", "integer", "Select by position instead of label", false),
+                ("index", "integer", "SelectString: zero-based menu ordinal; other addons: legacy AtkValue index", false),
                 ("containsMatch", "boolean", "Match labels by substring instead of exact (default false)", false),
                 ("dryRun", "boolean", "Report the entry that would be selected without activating it", false)),
             args => SelectAddonMenuItem(args),
@@ -584,7 +584,8 @@ internal static class UiTools
                                       "found in this addon; list it with list_addon_elements");
 
             var listNodeId = list->OwnerNode is not null ? list->OwnerNode->NodeId : 0;
-            list->SelectItem(index, true);
+            list->SelectItem(index, false);
+            list->DispatchItemEvent(index, AtkEventType.ListItemClick);
 
             return new JObject
             {
@@ -593,7 +594,7 @@ internal static class UiTools
                 ["listNodeId"] = (int)listNodeId,
                 ["index"] = index,
                 ["clicked"] = true,
-                ["via"] = "AtkComponentList.SelectItem",
+                ["via"] = "AtkComponentList.DispatchItemEvent(ListItemClick)",
             };
         }
 
@@ -890,7 +891,11 @@ internal static class UiTools
 
         var values = unit->AtkValuesSpan;
         var candidates = new List<(int Index, string Label)>();
-        for (var i = 0; i < values.Length; i++)
+        nint nativeList = 0;
+        var nativeMenu = unit->NameString == "SelectString";
+        if (nativeMenu)
+            candidates = ReadSelectStringEntries(unit, out nativeList);
+        for (var i = 0; !nativeMenu && i < values.Length; i++)
         {
             AtkValue* value = null;
             try
@@ -922,8 +927,10 @@ internal static class UiTools
         if (indexArg is not null && indexArg.Type != JTokenType.Null)
         {
             var index = indexArg.Value<int>();
-            if (index < 0 || index >= values.Length)
-                throw new ToolException($"index {index} is outside the addon's value table (0-{values.Length - 1})");
+            if (index < 0 || index >= (nativeMenu ? candidates.Count : values.Length))
+                throw new ToolException(nativeMenu
+                    ? $"menu index {index} must be between 0 and {candidates.Count - 1}"
+                    : $"index {index} is outside the addon's value table (0-{values.Length - 1})");
 
             var hit = candidates.FirstOrDefault(c => c.Index == index);
             selected = hit.Label is null ? (index, string.Empty) : hit;
@@ -944,7 +951,7 @@ internal static class UiTools
                 throw new ToolException($"no menu entry matches '{label}'. Available: {options}");
             }
 
-            if (exact.Count > 1 && !containsMatch)
+            if (exact.Count > 1)
             {
                 var options = string.Join(" | ", exact.Select(c => $"{c.Label} (index {c.Index})"));
                 throw new ToolException($"'{label}' matches more than one entry: {options}. Pass index to disambiguate.");
@@ -960,12 +967,28 @@ internal static class UiTools
                 ["addon"] = unit->NameString,
                 ["addonId"] = (int)unit->Id,
                 ["index"] = selected.Index,
+                ["indexKind"] = nativeMenu ? "menuOrdinal" : "atkValueIndex",
                 ["label"] = selected.Label,
                 ["dryRun"] = true,
                 ["selected"] = false,
             };
         }
 
+        // SelectString AtkValues include the title and metadata before the labels.
+        // Its popup entries, not those value-table indices, define the actual selection.
+        if (nativeMenu)
+        {
+            var list = (AtkComponentList*)nativeList;
+            list->SelectItem(selected.Index, false);
+            list->DispatchItemEvent(selected.Index, AtkEventType.ListItemClick);
+            return new JObject
+            {
+                ["addon"] = unit->NameString, ["addonId"] = (int)unit->Id,
+                ["index"] = selected.Index, ["indexKind"] = "menuOrdinal",
+                ["label"] = selected.Label, ["selected"] = true,
+                ["inputDispatched"] = true, ["via"] = "AtkComponentList.DispatchItemEvent(ListItemClick)",
+            };
+        }
         var fired = unit->FireCallbackInt(selected.Index);
         return new JObject
         {
@@ -976,6 +999,30 @@ internal static class UiTools
             ["selected"] = true,
             ["callbackAccepted"] = fired,
         };
+    }
+
+    private static unsafe List<(int Index, string Label)> ReadSelectStringEntries(AtkUnitBase* unit, out nint list)
+    {
+        list = 0;
+        if (!TryNative((AddonSelectString*)unit, out var addon))
+            throw new ToolException("SelectString layout is unreadable");
+        var menu = addon.PopupMenu;
+        if (menu.Owner != unit || menu.EntryCount is < 1 or > 256 || menu.EntryNames is null ||
+            !TryNative(menu.List, out var nativeList) || nativeList.ListLength != menu.EntryCount ||
+            !TryNative(nativeList.OwnerNode, out var owner) || owner.Component != (AtkComponentBase*)menu.List ||
+            ComponentKindOf(nativeList.OwnerNode) != ComponentType.List || !NodeVisible((AtkResNode*)nativeList.OwnerNode))
+            throw new ToolException("SelectString popup/list layout is not ready or inconsistent");
+        if ((owner.NodeFlags & NodeFlags.Enabled) == 0)
+            throw new ToolException("SelectString list is disabled");
+        var entries = new List<(int, string)>();
+        for (var i = 0; i < menu.EntryCount; i++)
+        {
+            if (!TryNative(menu.EntryNames + i, out var pointer) || ReadCString(pointer) is not { } label)
+                throw new ToolException($"SelectString entry {i} is unreadable");
+            entries.Add((i, NormalizeMenuLabel(label)));
+        }
+        list = (nint)menu.List;
+        return entries;
     }
 
     /// <summary>
@@ -1441,38 +1488,29 @@ internal static class UiTools
     }
 
     /// <summary>
-    /// Finds a visible list component whose item count exceeds <paramref name="index"/>,
-    /// so 'index' clicks land on the right list without the caller naming it.
+    /// Finds one unambiguous visible list in the bounded ULD array. Child/sibling
+    /// pointers do not reliably expose popup lists and are not followed here.
     /// </summary>
     private static unsafe AtkComponentList* FindListByIndex(AtkUnitBase* unit, int index)
     {
-        return FindListNode(unit->RootNode, index);
-
-        static unsafe AtkComponentList* FindListNode(AtkResNode* node, int index)
-        {
-            while (node is not null)
-            {
-                if (IsComponentType(node) && NodeVisible(node))
-                {
-                    var compNode = ComponentNodeOf(node);
-                    if (compNode is not null && compNode->Component is not null &&
-                        ComponentKindOf(compNode) == ComponentType.List)
-                    {
-                        var list = (AtkComponentList*)compNode->Component;
-                        if (index < list->ListLength)
-                            return list;
-                    }
-                }
-
-                var inChild = FindListNode(node->ChildNode, index);
-                if (inChild is not null)
-                    return inChild;
-
-                node = node->NextSiblingNode;
-            }
-
+        if (index < 0 || !TryNative(unit, out var addon) || addon.UldManager.NodeListCount > 512)
             return null;
+        AtkComponentList* found = null;
+        for (var i = 0; i < addon.UldManager.NodeListCount; i++)
+        {
+            if (!TryNative((nuint*)(addon.UldManager.NodeList + i), out var pointer)) return null;
+            var node = (AtkResNode*)pointer;
+            var component = ComponentNodeOf(node);
+            if (component is null || !NodeVisible(node) || ComponentKindOf(component) != ComponentType.List ||
+                !TryNative(component, out var componentData) ||
+                !TryNative((AtkComponentList*)componentData.Component, out var data) ||
+                data.ListLength is < 1 or > 4096 || index >= data.ListLength)
+                continue;
+            var candidate = (AtkComponentList*)componentData.Component;
+            if (found != null && found != candidate) return null;
+            found = candidate;
         }
+        return found;
     }
 
     private static int ClampInt(JToken? token, int min, int max, int fallback)

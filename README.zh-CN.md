@@ -230,6 +230,9 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 当前目录包含 108 个工具：65 个只读、43 个可变更。下表按功能列出主要工具及参数摘要；
 完整目录和参数约束以服务器返回的 `tools/list` schema 为准，可变更工具在 `AllowMutatingTools` 启用后开放。
 
+`SelectString` 菜单选择使用从零开始的原生选项编号，不使用 `AtkValue` 字段索引。
+预览结果和验证范围见[菜单选择说明](docs/menu-selection.md)。
+
 ### 客户端与会话
 
 | 工具 | 描述 | 关键参数 |

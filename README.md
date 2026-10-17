@@ -242,6 +242,9 @@ The catalog contains 108 tools: 65 read-only and 43 mutating. The tables summari
 The server's `tools/list` schemas define the complete catalog and argument constraints.
 Mutating tools are available only when `AllowMutatingTools` is enabled.
 
+For `SelectString`, menu selection uses zero-based popup-entry ordinals, not `AtkValue` indices.
+See [menu-selection behavior](docs/menu-selection.md) for dry-run results and validation limits.
+
 ### Client and session
 
 | Tool | Description | Notable parameters |

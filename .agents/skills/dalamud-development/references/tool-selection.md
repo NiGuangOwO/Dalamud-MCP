@@ -1,5 +1,7 @@
 # Choose tools by the question
 
+For `SelectString`, prefer `select_addon_menu_item` by label and inspect `dryRun` first. Its `indexKind=menuOrdinal` is a zero-based popup entry index, not the label's `AtkValue` index. Other addon layouts retain legacy callback behavior and need an independently established contract; a text-field index alone is insufficient. See [menu-selection.md](../../../../docs/menu-selection.md).
+
 Use the connected schemas for exact arguments, limits and defaults. This is a routing guide, not a complete tool catalog. Server aliases and tool namespace prefixes may differ between clients.
 
 | Question | Useful tools and interpretation |

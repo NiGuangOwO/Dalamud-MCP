@@ -69,6 +69,54 @@ unsafe class Program
             Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"Button")));
             Marshal.WriteIntPtr(list,Offset(T("AtkComponentButton"),"ButtonTextNode"),unchecked((nint)0x7FFF00000003L));
             Check(Label(compNode)==null,"button with noncanonical text-node pointer cannot fault before string validation");
+            // Reproduce the live SelectString layout: the list is in the ULD array,
+            // while the legacy child/sibling path does not expose it.
+            Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"List")));
+            var flagType=nodeType.GetField("NodeFlags")!.FieldType;
+            Marshal.WriteInt32(compNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+            Marshal.WriteIntPtr(list,Offset(compType,"OwnerNode"),compNode);
+            Marshal.WriteInt32(list,Offset(listType,"ListLength"),2);
+            var unitType=T("AtkUnitBase"); var selectType=fcs.GetType("FFXIVClientStructs.FFXIV.Client.UI.AddonSelectString")!;
+            var unit=Allocate(Size(selectType));var nodeArray=Allocate(8);
+            Marshal.WriteIntPtr(nodeArray,compNode);
+            var unitUld=Offset(unitType,"UldManager");
+            Marshal.WriteIntPtr(unit,unitUld+Offset(uld,"NodeList"),nodeArray);
+            Marshal.WriteInt16(unit,unitUld+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteIntPtr(unit,Offset(unitType,"RootNode"),1);
+            var findList=ui.GetMethod("FindListByIndex",BindingFlags.NonPublic|BindingFlags.Static)!;
+            nint FindList(int index)=>(nint)Pointer.Unbox(findList.Invoke(null,new object?[]{Pointer.Box((void*)unit,findList.GetParameters()[0].ParameterType),index})!);
+            Check(FindList(0)==list,"list discovery uses ULD array without dereferencing invalid root");
+            Check(FindList(-1)==0&&FindList(2)==0,"negative and out-of-range list indices refused");
+            Marshal.WriteIntPtr(unit,unitUld+Offset(uld,"NodeList"),1);
+            Check(FindList(0)==0,"unreadable ULD node array refused");
+            Marshal.WriteIntPtr(unit,unitUld+Offset(uld,"NodeList"),nodeArray);
+            var popupType=selectType.GetField("PopupMenu")!.FieldType;var popupOffset=Offset(selectType,"PopupMenu");
+            Marshal.WriteIntPtr(unit,popupOffset+Offset(popupType,"Owner"),unit);
+            Marshal.WriteIntPtr(unit,popupOffset+Offset(popupType,"List"),list);
+            Marshal.WriteInt32(unit,popupOffset+Offset(popupType,"EntryCount"),2);
+            var entryNames=Allocate(16);Marshal.WriteIntPtr(unit,popupOffset+Offset(popupType,"EntryNames"),entryNames);
+            var label0=Marshal.StringToCoTaskMemUTF8("Aethernet");var label1=Marshal.StringToCoTaskMemUTF8("Cancel");
+            try
+            {
+                Marshal.WriteIntPtr(entryNames,label0);Marshal.WriteIntPtr(entryNames,8,label1);
+                var readMenu=ui.GetMethod("ReadSelectStringEntries",BindingFlags.NonPublic|BindingFlags.Static)!;
+                object? ReadMenu()=>readMenu.Invoke(null,new object?[]{Pointer.Box((void*)unit,readMenu.GetParameters()[0].ParameterType),(nint)0});
+                var entries=(System.Collections.IList)ReadMenu()!;
+                var first=(System.Runtime.CompilerServices.ITuple)entries[0]!;
+                Check(entries.Count==2&&(int)first[0]! == 0&&(string)first[1]! == "Aethernet","popup menu uses ordinal zero and excludes title/value indices");
+                bool Refused(){try{ReadMenu();return false;}catch(TargetInvocationException e){return e.InnerException?.GetType().Name=="ToolException";}}
+                Marshal.WriteInt32(compNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible")));
+                Check(Refused(),"disabled popup list refused");
+                Marshal.WriteInt32(compNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+                Marshal.WriteInt32(unit,popupOffset+Offset(popupType,"EntryCount"),257);
+                Check(Refused(),"oversized popup entry count refused");
+                Marshal.WriteInt32(unit,popupOffset+Offset(popupType,"EntryCount"),2);
+                Marshal.WriteIntPtr(entryNames,1);
+                Check(Refused(),"unreadable popup label refused before native selection");
+                Marshal.WriteIntPtr(entryNames,label0);Marshal.WriteIntPtr(unit,popupOffset+Offset(popupType,"Owner"),1);
+                Check(Refused(),"popup belonging to a different addon refused");
+            }
+            finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
         }
         finally{foreach(var p in allocations)Marshal.FreeHGlobal(p);}
         var page=VirtualAlloc(0,4096,0x3000,0x04);
