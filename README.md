@@ -11,7 +11,7 @@ plugin development, runtime inspection and in-game validation.
 The plugin runs within the game process and exposes character, object, party, inventory, game-data and UI state
 through Dalamud services and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 It also provides validated raw-memory reads, event collection, screenshots and inter-plugin communication.
-The current catalog contains **110 tools: 66 read-only and 44 mutating**. Mutating tools require explicit enablement.
+The current catalog contains **115 tools: 70 read-only and 45 mutating**. Mutating tools require explicit enablement.
 
 The default endpoint is `http://127.0.0.1:18777/mcp`. HTTP-capable MCP clients connect directly;
 stdio-only clients use the included bridge.
@@ -238,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-The catalog contains 110 tools: 66 read-only and 44 mutating. The tables summarize the principal tools and parameters.
+The catalog contains 115 tools: 70 read-only and 45 mutating. The tables summarize the principal tools and parameters.
 The server's `tools/list` schemas define the complete catalog and argument constraints.
 Mutating tools are available only when `AllowMutatingTools` is enabled.
 
@@ -441,6 +441,10 @@ These tools access declared endpoints and receive pushed data through Dalamud IP
 `register_ipc_endpoint` and `call_plugin_ipc` are mutating tools.
 Push-data reads, subscription management and endpoint-list queries use the read-only classification;
 that classification does not imply that local queues or configuration remain unchanged.
+
+### Combat encounter recording
+
+Opt-in combat gates and a server action-effect timeline are available through five `combat_recording_*` tools. See [combat recording](docs/combat-recording.md) for schemas, bounded retention, JSON export and coverage limitations.
 
 ### Event collector
 

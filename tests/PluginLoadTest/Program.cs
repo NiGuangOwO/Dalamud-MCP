@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 110;
+    private const int ExpectedTools = 115;
 
     private static int checks;
     private static int failures;
@@ -81,7 +81,8 @@ internal static class Program
             return 1;
         }
 
-        var pluginDll = Path.Combine(repoRoot, "src", "DalamudMCP", "bin", "x64", "Debug", "DalamudMCP.dll");
+        var pluginDll = args.Length > 0 ? Path.GetFullPath(args[0])
+            : Path.Combine(repoRoot, "src", "DalamudMCP", "bin", "x64", "Debug", "DalamudMCP.dll");
         var devDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "XIVLauncherCN", "addon", "Hooks", "dev");
@@ -354,6 +355,8 @@ internal static class Program
         Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
         var windowTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_game_window_state"));
         Check("game window control is classified as mutating", Equals(Prop(windowTool, "Mutating"), true));
+        var combatTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "combat_recording_configure"));
+        Check("combat hook configuration is classified as mutating", Equals(Prop(combatTool, "Mutating"), true));
         Check("Plugin.ToolCount agrees with the registry", Equals(Prop(plugin, "ToolCount"), toolNames.Count));
 
         // ------------------------------------------------------------- running
@@ -404,6 +407,20 @@ internal static class Program
             Check("tools/call get_conditions did not error", !isError, FirstLine(payload ?? callText));
             Check("the handler ran and produced its own JSON", payload is not null && payload.Contains("\"activeConditions\"", StringComparison.Ordinal),
                 FirstLine(payload ?? callText));
+            var combatStatus = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 200, method = "tools/call",
+                    @params = new { name = "combat_recording_status", arguments = new { } } })).ConfigureAwait(false);
+            var (combatPayload, combatError) = UnwrapToolResult(combatStatus);
+            using (var state = JsonDocument.Parse(combatPayload ?? "{}"))
+                Check("combat recording is disabled and unhooked on plugin load", !combatError &&
+                    state.RootElement.GetProperty("enabled").GetBoolean() == false &&
+                    state.RootElement.GetProperty("hooked").GetBoolean() == false);
+            var invalidCombat = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 201, method = "tools/call",
+                    @params = new { name = "combat_recording_configure", arguments = new { enabled = "true" } } })).ConfigureAwait(false);
+            var (invalidCombatPayload, invalidCombatError) = UnwrapToolResult(invalidCombat);
+            Check("combat recorder refuses string booleans before native setup", invalidCombatError &&
+                invalidCombatPayload?.Contains("boolean", StringComparison.Ordinal) == true);
 
             // get_module_info reads only scalar SigScanner properties, so it must survive
             // inert services too - a second handler exercising a different service.
@@ -449,6 +466,12 @@ internal static class Program
             Set(config, "AllowMutatingTools", false);
             try
             {
+                var blockedCombat = await CallAsync(http, baseUrl, sessionId,
+                    JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 202, method = "tools/call",
+                        @params = new { name = "combat_recording_configure", arguments = new { enabled = true } } })).ConfigureAwait(false);
+                var (blockedCombatPayload, blockedCombatError) = UnwrapToolResult(blockedCombat);
+                Check("combat recording respects the live mutation gate", blockedCombatError &&
+                    blockedCombatPayload?.Contains("disabled", StringComparison.OrdinalIgnoreCase) == true);
                 var disabledIpc = await CallAsync(http, baseUrl, sessionId,
                     "{\"jsonrpc\":\"2.0\",\"id\":108,\"method\":\"tools/call\",\"params\":{\"name\":\"call_plugin_ipc\",\"arguments\":{\"pluginName\":\"test\",\"methodName\":\"test\"}}}").ConfigureAwait(false);
                 var (disabledPayload, disabledError) = UnwrapToolResult(disabledIpc);

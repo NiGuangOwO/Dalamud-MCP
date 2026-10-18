@@ -646,7 +646,10 @@ public sealed class McpServer : IDisposable
                         "before test commands; the MCP host instead exposes its buildMvid at /health. Verify resulting " +
                         "state after actions: a dispatched command/event does not prove success. If a necessary capability " +
                         "is missing and MCP development is in scope, add and test a reusable bounded tool before dependent " +
-                        "plugin work. Reproduce native crashes offline before retrying the affected live path.",
+                        "plugin work. Reproduce native crashes offline before retrying the affected live path. " +
+                        "For encounter action timelines, explicitly enable combat_recording_configure, inspect partial-start, " +
+                        "truncation and packet-loss metadata, and export before re-enabling/reloading. Server effects are " +
+                        "not a complete FFLogs parser or confirmed effective damage/healing.",
                 };
 
                 if (session.ProtocolVersion == "2024-11-05") result["sessionId"] = session.Id;

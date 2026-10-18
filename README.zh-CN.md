@@ -9,7 +9,7 @@ Dalamud MCP 是适用于 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goat
 
 插件运行于游戏进程内部，通过 Dalamud 服务和 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs)
 提供角色、游戏对象、小队、物品栏、游戏数据及界面状态访问，并支持经过校验的原始内存读取、事件采集、截图和插件间通信。
-当前工具目录包含 **110 个工具，其中 66 个只读、44 个可变更**。可变更工具需在配置中显式启用。
+当前工具目录包含 **115 个工具，其中 70 个只读、45 个可变更**。可变更工具需在配置中显式启用。
 
 默认 MCP 地址为 `http://127.0.0.1:18777/mcp`。支持 HTTP 的 MCP 客户端可直接连接；仅支持 stdio 的客户端可使用仓库附带的桥接程序。
 
@@ -227,7 +227,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-当前目录包含 110 个工具：66 个只读、44 个可变更。下表按功能列出主要工具及参数摘要；
+当前目录包含 115 个工具：70 个只读、45 个可变更。下表按功能列出主要工具及参数摘要；
 完整目录和参数约束以服务器返回的 `tools/list` schema 为准，可变更工具在 `AllowMutatingTools` 启用后开放。
 
 `SelectString` 菜单选择使用从零开始的原生选项编号，不使用 `AtkValue` 字段索引。
@@ -429,6 +429,8 @@ FFXIVClientStructs 静态地址解析器尚未初始化时，相关工具返回�
 推送数据读取、订阅管理和端点列表查询按只读工具开放；该分类不表示本地队列或配置完全不变。
 
 ### 事件采集器
+
+可使用五个 `combat_recording_*` 工具按进出战斗分场记录服务端技能效果，并分页读取或导出 JSON。详见[战斗记录](docs/combat-recording.md)的使用方式、容量和覆盖范围。
 
 事件采集器随框架更新记录状态变化，使用容量为 2000 的环形缓冲区。
 支持 `hp_change`、`mp_change`、`gp_change`、`player_move`、`job_change`、`target_change`、
