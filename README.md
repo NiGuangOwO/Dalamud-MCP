@@ -11,7 +11,7 @@ plugin development, runtime inspection and in-game validation.
 The plugin runs within the game process and exposes character, object, party, inventory, game-data and UI state
 through Dalamud services and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 It also provides validated raw-memory reads, event collection, screenshots and inter-plugin communication.
-The current catalog contains **109 tools: 66 read-only and 43 mutating**. Mutating tools require explicit enablement.
+The current catalog contains **110 tools: 66 read-only and 44 mutating**. Mutating tools require explicit enablement.
 
 The default endpoint is `http://127.0.0.1:18777/mcp`. HTTP-capable MCP clients connect directly;
 stdio-only clients use the included bridge.
@@ -238,12 +238,14 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-The catalog contains 109 tools: 66 read-only and 43 mutating. The tables summarize the principal tools and parameters.
+The catalog contains 110 tools: 66 read-only and 44 mutating. The tables summarize the principal tools and parameters.
 The server's `tools/list` schemas define the complete catalog and argument constraints.
 Mutating tools are available only when `AllowMutatingTools` is enabled.
 
 For `SelectString`, menu selection uses zero-based popup-entry ordinals, not `AtkValue` indices.
 See [menu-selection behavior](docs/menu-selection.md) for dry-run results and validation limits.
+
+Use `set_addon_checkbox` for native checkbox state. See [checkbox behavior and validation](docs/checkboxes.md).
 
 ### Client and session
 

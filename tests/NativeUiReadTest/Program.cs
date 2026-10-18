@@ -117,6 +117,49 @@ unsafe class Program
                 Check(Refused(),"popup belonging to a different addon refused");
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
+            var checkboxApi=plugin.GetType("DalamudMCP.Tools.CheckboxTools")!;
+            var readCheckbox=checkboxApi.GetMethod("TryReadCheckbox",BindingFlags.NonPublic|BindingFlags.Static)!;
+            bool ReadCheckbox(nint pointer,out bool checkedState){object?[] values={pointer,(nint)0,false};var result=(bool)readCheckbox.Invoke(null,values)!;checkedState=(bool)values[2]!;return result;}
+            var checkbox=Allocate(Size(T("AtkComponentCheckBox")));
+            Marshal.WriteIntPtr(compNode,Offset(compNodeType,"Component"),checkbox);
+            Marshal.WriteByte(checkbox,uldOffset+Offset(uld,"BaseType"),Convert.ToByte(Enum.Parse(baseType,"Component")));
+            Marshal.WriteIntPtr(checkbox,uldOffset+Offset(uld,"Objects"),info);
+            Marshal.WriteIntPtr(checkbox,Offset(compType,"OwnerNode"),compNode);
+            Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"CheckBox")));
+            Check(ReadCheckbox(compNode,out var checkedState)&&!checkedState,"unchecked SDK checkbox read without native invocation");
+            Marshal.WriteInt32(checkbox,Offset(T("AtkComponentButton"),"Flags"),1<<18);
+            Check(ReadCheckbox(compNode,out checkedState)&&checkedState,"checked state follows installed SDK button flag");
+            Marshal.WriteIntPtr(checkbox,Offset(compType,"OwnerNode"),1);
+            Check(!ReadCheckbox(compNode,out _),"checkbox with mismatched owner refused");
+            Marshal.WriteIntPtr(checkbox,Offset(compType,"OwnerNode"),compNode);
+            Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"Button")));
+            Check(!ReadCheckbox(compNode,out _),"ordinary button cannot become checkbox by cast");
+            Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"CheckBox")));
+            Marshal.WriteIntPtr(compNode,Offset(compNodeType,"Component"),1);
+            Check(!ReadCheckbox(compNode,out _),"unreadable checkbox component refused");
+            Check(!ReadCheckbox(1,out _),"unmapped checkbox node refused");
+            Marshal.WriteIntPtr(compNode,Offset(compNodeType,"Component"),checkbox);
+            var findCheckbox=checkboxApi.GetMethod("Find",BindingFlags.NonPublic|BindingFlags.Static)!;
+            nint FindCheckbox(uint id)=>(nint)Pointer.Unbox(findCheckbox.Invoke(null,new object?[]{Marshal.PtrToStructure(unit+unitUld,uld),id})!);
+            Marshal.WriteInt32(compNode,Offset(nodeType,"NodeId"),3);
+            Check(FindCheckbox(3)==compNode&&FindCheckbox(4)==0,"checkbox node search uses exact scoped ULD ids");
+            Marshal.WriteInt16(unit,unitUld+Offset(uld,"NodeListCount"),4097);
+            Check(FindCheckbox(3)==0,"oversized checkbox ULD array refused");
+            Marshal.WriteInt16(unit,unitUld+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteIntPtr(unit,unitUld+Offset(uld,"NodeList"),1);
+            Check(FindCheckbox(3)==0,"unmapped checkbox ULD array refused");
+            var repeated=Allocate(16);Marshal.WriteIntPtr(repeated,compNode);Marshal.WriteIntPtr(repeated,8,compNode);
+            Marshal.WriteIntPtr(unit,unitUld+Offset(uld,"NodeList"),repeated);
+            Marshal.WriteInt16(unit,unitUld+Offset(uld,"NodeListCount"),2);
+            Check(FindCheckbox(3)==0,"ambiguous checkbox node ids refused");
+            var boolean=checkboxApi.GetMethod("StrictBoolean",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var jtype=json.GetType("Newtonsoft.Json.Linq.JObject")!;var parse=jtype.GetMethod("Parse",new[]{typeof(string)})!;
+            bool Bool(string input)=> (bool)boolean.Invoke(null,new object?[]{parse.Invoke(null,new[]{input}),"checked",null})!;
+            Check(Bool("{\"checked\":true}")&&!Bool("{\"checked\":false}"),"checkbox accepts native JSON booleans");
+            foreach(var input in new[]{"{}","{\"checked\":null}","{\"checked\":1}","{\"checked\":\"false\"}"}){
+                var refused=false;try{Bool(input);}catch(TargetInvocationException e){refused=e.InnerException?.GetType().Name=="ToolException";}
+                Check(refused,"checkbox missing/coerced boolean refused: "+input);
+            }
             var tableType=Assembly.LoadFrom(Path.Combine(sdk,"Dalamud.dll")).GetType("Dalamud.Game.Addon.Lifecycle.AddonVirtualTable")!;
             var table=System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(tableType);
             var tableFlags=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance;

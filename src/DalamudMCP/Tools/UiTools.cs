@@ -183,13 +183,14 @@ internal static class UiTools
                 ("allNodes", "boolean", "Report every node, not just labeled/clickable ones (default false)", false)),
             args => ListAddonElements(args));
 
+        CheckboxTools.Register(registry);
         registry.Add(
             "click_addon_element",
             "Click an addon (UI window) element",
             "Dispatches one UI event (default: left click) at a node inside a loaded addon, " +
             "through the addon's own event pipeline — the same dispatch a real mouse click " +
             "feeds it. Resolve a nodeId with list_addon_elements first. For list components " +
-            "you may pass 'index' to click a list item directly. This is a mutating tool: it " +
+            "you may pass 'index' to click a list item directly. CheckBox controls require set_addon_checkbox with an explicit checked state. This is a mutating tool: it " +
             "is hidden from tools/list and refused by tools/call while the plugin's " +
             "allow-mutating-tools switch is off.",
             Json.Schema(
@@ -625,6 +626,8 @@ internal static class UiTools
                                   "with list_addon_elements");
         if (!NodeVisible(node))
             return Json.ToolError($"node {nodeId} is not currently visible");
+        if (IsComponentType(node) && ComponentKindOf((AtkComponentNode*)node) == ComponentType.CheckBox)
+            return Json.ToolError("Use set_addon_checkbox with an explicit checked boolean; addon event dispatch alone does not update native checkbox state");
 
         // ClickLib's proven dispatch shape (ClickBase.SendClick): ALWAYS dispatch through
         // the ADDON's own vtable ReceiveEvent (vfunc[2]) with the addon as both receiver
@@ -1259,7 +1262,7 @@ internal static class UiTools
     /// The kind lives in the ULD component info, which is only populated when the manager's
     /// BaseType is Component.
     /// </summary>
-    private static unsafe ComponentType? ComponentKindOf(AtkComponentNode* compNode)
+    internal static unsafe ComponentType? ComponentKindOf(AtkComponentNode* compNode)
     {
         if (!TryNative(compNode, out var node) || !TryNative(node.Component, out var comp)) return null;
         if (comp.UldManager.BaseType != AtkUldManagerBaseType.Component)
