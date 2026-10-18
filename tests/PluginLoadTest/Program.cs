@@ -180,6 +180,7 @@ internal static class Program
         // The ctor reads UiBuilder twice (Draw += and OpenConfigUi +=), so the same proxy
         // must come back both times or the remove-vs-add pairing on Dispose is meaningless.
         object? uiBuilder = null;
+        var frameworkUpdates = new List<Delegate>();
 
         object? Handler(MethodInfo method, object?[]? args)
         {
@@ -221,6 +222,13 @@ internal static class Program
 
                 case "get_UpdateDelta":
                     return TimeSpan.FromMilliseconds(16);
+
+                case "add_Update":
+                    if (args?[0] is Delegate addedUpdate) frameworkUpdates.Add(addedUpdate);
+                    return null;
+                case "remove_Update":
+                    if (args?[0] is Delegate removedUpdate) frameworkUpdates.Remove(removedUpdate);
+                    return null;
 
                 case "RunOnFrameworkThread":
                     return RunInline(method, args);
@@ -330,6 +338,18 @@ internal static class Program
 
         Check("Plugin constructor completed without throwing", plugin is not null);
         if (plugin is null) return 1;
+        Check("background combat capture is enabled by default", Equals(Prop(config, "BackgroundCombatRecording"), true));
+        Check("background combat watcher subscribes during plugin load", frameworkUpdates.Any(d => d.Method.Name == "Watch" && d.Method.DeclaringType?.Name == "CombatRecorder"));
+        var recorderInstance = pluginType.GetField("combatRecorder", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(plugin)!;
+        var deadlineField = recorderInstance.GetType().GetField("deadline", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        deadlineField.SetValue(recorderInstance, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1);
+        Set(config, "AllowMutatingTools", false);
+        var watch = frameworkUpdates.Single(d => d.Method.Name == "Watch" && d.Method.DeclaringType?.Name == "CombatRecorder");
+        watch.DynamicInvoke(services[Array.FindIndex(parameters, p => p.ParameterType.Name == "IFramework")]);
+        Check("timed capture expires even while the mutation gate is closed", Equals(Prop(config, "BackgroundCombatRecording"), false));
+        Set(config, "BackgroundCombatRecording", true);
+        Set(config, "AllowMutatingTools", true);
+        deadlineField.SetValue(recorderInstance, 0L);
 
         // ---------------------------------------------------------- config load
         var loadedConfig = Prop(plugin, "Config");
@@ -1060,6 +1080,7 @@ internal static class Program
         // user reaches for when the plugin misbehaves, and the ones most likely to leak a socket.
         chatMessages.Clear();
         RunCommand(plugin, commandInfos, "/dalamudmcp", "stop");
+        Check("stopping the MCP listener preserves the background combat watcher", frameworkUpdates.Any(d => d.Method.Name == "Watch" && d.Method.DeclaringType?.Name == "CombatRecorder"));
         Check("the stop subcommand stopped the listener", Equals(Prop(plugin, "IsRunning"), false),
             $"IsRunning={Prop(plugin, "IsRunning")}");
         var servingAfterStop = await ServesHttpAsync(baseUrl).ConfigureAwait(false);
@@ -1140,6 +1161,7 @@ internal static class Program
         }
 
         Check("listener is stopped after Dispose", Equals(Prop(plugin, "IsRunning"), false));
+        Check("combat watcher and collectors unsubscribe on plugin unload", frameworkUpdates.Count == 0);
         Check("the command handler was removed on unload", commandsRemoved.Contains("/dalamudmcp"), string.Join(", ", commandsRemoved));
         Check("UiBuilder.Draw was unsubscribed on unload", uiSubscriptions.Contains("remove_Draw"));
         Check("UiBuilder.OpenConfigUi was unsubscribed on unload", uiSubscriptions.Contains("remove_OpenConfigUi"));

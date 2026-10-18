@@ -52,6 +52,12 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Auto-start the listener when the plugin loads.</summary>
     public bool AutoStart { get; set; } = true;
 
+    /// <summary>Continuously arm the combat recorder, independently of MCP listener clients.</summary>
+    public bool BackgroundCombatRecording { get; set; } = true;
+    public string CombatRecordingScope { get; set; } = "local";
+    public int CombatRecordingMaxEvents { get; set; } = 20000;
+    public int CombatRecordingMaxEncounters { get; set; } = 5;
+
     /// <summary>
     /// UI/command language: "auto" follows the game client language, or an explicit
     /// code accepted by <see cref="Localization.Normalize"/> ("en", "zh", ...).
@@ -80,6 +86,9 @@ public sealed class Configuration : IPluginConfiguration
         if (MaxObjectResults is < 1 or > 5000) MaxObjectResults = 200;
         if (MaxMemoryReadBytes is < 16 or > 1024 * 1024) MaxMemoryReadBytes = 65536;
         AuthToken ??= string.Empty;
+        if (CombatRecordingScope != "local" && CombatRecordingScope != "all") CombatRecordingScope = "local";
+        CombatRecordingMaxEvents = Math.Clamp(CombatRecordingMaxEvents, 100, 50000);
+        CombatRecordingMaxEncounters = Math.Clamp(CombatRecordingMaxEncounters, 1, 10);
         Language = Localization.Normalize(Language) is { } lang ? lang : Localization.Auto;
 
         try

@@ -139,6 +139,15 @@ public sealed class ConfigWindow : Window
         ImGui.Spacing();
 
         // ----------------------------------------------------------- limits
+        var backgroundRecording = config.BackgroundCombatRecording;
+        if (ImGui.Checkbox(Localization.T("ui.backgroundCombat"), ref backgroundRecording))
+        {
+            config.BackgroundCombatRecording = backgroundRecording;
+            Persist();
+        }
+        ImGui.TextWrapped(Localization.T("ui.backgroundCombatHint"));
+        ImGui.Spacing();
+
         ImGui.Text(Localization.T("ui.limits"));
 
         var maxObjects = config.MaxObjectResults;

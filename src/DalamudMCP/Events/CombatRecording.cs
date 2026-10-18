@@ -34,6 +34,7 @@ internal sealed class CombatRecording
     public int EvictedEncounters { get; private set; }
     public Encounter? Active { get; private set; }
     public IReadOnlyList<Encounter> Encounters => encounters;
+    public event Action<Encounter>? EncounterEnded;
 
     public CombatRecording(int maxEvents = 20000, int maxEncounters = 5)
     {
@@ -93,10 +94,12 @@ internal sealed class CombatRecording
     {
         if (Active == null) { preRoll.Clear(); return; }
         Add(now, new JObject { ["type"] = "combat_end", ["reason"] = reason });
-        Active.EndedAt = now;
-        Active.EndReason = reason;
+        var completed = Active;
+        completed.EndedAt = now;
+        completed.EndReason = reason;
         Active = null;
         preRoll.Clear();
+        EncounterEnded?.Invoke(completed);
     }
 
     public Encounter Get(string? id) => (id == null ? encounters.LastOrDefault() : encounters.Find(e => e.Id == id))

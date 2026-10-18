@@ -444,7 +444,7 @@ that classification does not imply that local queues or configuration remain unc
 
 ### Combat encounter recording
 
-Opt-in combat gates and a server action-effect timeline are available through five `combat_recording_*` tools. See [combat recording](docs/combat-recording.md) for schemas, bounded retention, JSON export and coverage limitations.
+Combat recording runs automatically in the background while mutating tools are allowed, independently of MCP clients/listener. Completed fights are compressed with 7-day, 1000-fight and 100 MiB retention limits. Five `combat_recording_*` tools inspect/configure recording and read archives after reload. See [combat recording](docs/combat-recording.md) for schemas and coverage limitations.
 
 ### Event collector
 

@@ -647,8 +647,9 @@ public sealed class McpServer : IDisposable
                         "state after actions: a dispatched command/event does not prove success. If a necessary capability " +
                         "is missing and MCP development is in scope, add and test a reusable bounded tool before dependent " +
                         "plugin work. Reproduce native crashes offline before retrying the affected live path. " +
-                        "For encounter action timelines, explicitly enable combat_recording_configure, inspect partial-start, " +
-                        "truncation and packet-loss metadata, and export before re-enabling/reloading. Server effects are " +
+                        "Combat recording runs in the background by default while the mutation gate permits, independently " +
+                        "of MCP clients/listener. Completed fights are compressed with bounded retention. Use combat_recording_status " +
+                        "to inspect capture/archive failures; read partial-start, truncation and packet-loss metadata. Server effects are " +
                         "not a complete FFLogs parser or confirmed effective damage/healing.",
                 };
 

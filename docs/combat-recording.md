@@ -1,29 +1,37 @@
-# 按战斗记录技能流
+# 后台战斗记录
 
-原有 `combat_damage` 是对玩家 HP 降低的采样，不是伤害解析器。新的记录器独立于该环形缓冲区和 500ms 事件节流，通过安装的 FFXIVClientStructs SDK 的 `ActionEffectHandler.Receive` 记录服务端技能效果。
+从 1.0.0.5 起，插件加载后会自动在后台等待战斗。`BackgroundCombatRecording` 默认 `true`，不再有默认 10 分钟期限；不需要 MCP 客户端连接，也不依赖 HTTP 监听器是否启动。仍尊重 `AllowMutatingTools`：关闭时暂停采集，重新打开后恢复。登录后自动启动，退出登录结束当前场，重新登录恢复。
 
-## 使用
+## 保存与容量
 
-1. `combat_recording_configure {"enabled":true,"scope":"local","durationSeconds":600}`。启用受 `AllowMutatingTools` 闸门约束，默认关闭，不保存启用状态。
-2. `combat_recording_status {}` 确认 `enabled`、`hooked`、超时及丢包计数。
-3. 进入战斗自动创建记录，退出战斗自动以 `combat_exit` 结束；随后进战创建另一场。启用时已经在战斗会标记 `partialStart=true`。
-4. `combat_recording_list {}` 列出场次。`combat_recording_read {"count":100}` 读取最新场次，使用返回的 `lastId` 作为下一页 `afterId`；可提供 `encounterId`。读取不会消费记录。
-5. `combat_recording_export {}` 将最新场次导出到插件配置目录的 `combat-recordings/combat-<id>.json`，返回实际绝对路径。也可指定 `encounterId`。
-6. `combat_recording_configure {"enabled":false}` 停止钩子并保留记录。再次启用会建立新缓冲区，旧数据须先导出。
+进战自动开场，脱战以 `combat_exit` 结算；每场结束后，在独立后台工作线程把紧凑 JSON 压缩为 `.json.gz`，写入插件配置目录 `combat-recordings/auto/`。游戏线程不执行压缩或自动写盘。默认范围 `local` 记录自身、宠物及指向自身的动作。无战斗时不生成场次文件，只保留短暂的开怪动作缓存。
 
-## 记录内容和边界
+自动归档最多保留 **7 天、1000 场、总计 100 MiB**，任一上限触发就清理较旧文件。插件加载、归档写入及每分钟执行清理；只处理本记录器格式的文件，不删除手动导出或其他文件。进程崩溃可能丢失当前未结束的战斗和尚未写完的队列。正常卸载会封场并最多等待 3 秒刷新写盘。
 
-- 每场带区域、职业、起止时间、结束原因、部分开场及截断信息。事件带单调递增 ID、UTC Unix 毫秒和相对进战的 `elapsedMs`。
-- 记录服务端 `action_effect`：来源/目标/拥有者 ID、技能 ID、本地化技能名、动作类型、服务端及客户端序列、动画锁、每目标最多 8 条原始效果。技能名只按 Action 类型解析。
-- 解码直接伤害/治疗的扩展数值、暴击/直击及反射/作用于来源标志。数值是服务端宣告效果，不保证等于实际扣血、有效治疗或 FFLogs DPS。
-- `local` 记录自身和自身宠物的动作，以及指向自身的动作；`all` 记录客户端收到的全部附近动作。每 100ms 采样最多 256 个可见战斗角色的读条、状态和死亡状态；`local` 下仅采样自身与自身宠物。范围外对象不保证有完整记录。
-- 入战前最多保留 1.5 秒、256 条自身动作，避免丢失开怪技能。此类事件可能 `elapsedMs<0`，标记 `prePull=true`。事件页按采集顺序返回；按时间展示时可用 `(timestamp,id)` 排序。
-- 默认保留 5 场、每场 20000 条；可设 1–10 场、100–50000 条。每场另有约 8 MiB 紧凑 JSON 预算，结束标记预留一条。`droppedEvents`、`EvictedEncounters` 明确反映丢弃。原生队列最多 2048 包，丢弃/无效包另有计数。
-- 有效期 10–1800 秒（默认 600）。超时、退出登录、关闭变更闸门、停止服务、卸载会停止采集并移除钩子。切换区域结束当前场次。
-- 数据在内存，插件重载会丢失。导出文件保留最近 10 个；导出进行中的场次只包含导出时的快照。不会上传。
-- 不覆盖周期 DoT/HoT 跳伤归因、技能请求/失败、完整战斗机制、精确读条结束原因或瞬间发生又消失的状态。状态移除也可能表示对象离开采样范围。这不是完整 FFLogs 替代品。
-- 导出不含角色姓名，但包含运行时对象 ID；发布测试证据时使用汇总信息。
+后台待写队列最多 4 场（另有 1 场可能正在写入）。`combat_recording_status` 中 `archive` 提供目录、文件数、已存字节数、待写数量、成功/失败/丢弃次数及最后错误。队列满不会阻塞游戏线程。历史压缩记录可在插件重载后继续读取。手动 JSON 导出独立保留最近 10 个，不计入自动归档预算。
+
+实测一场 158 秒、306 事件的旧版缩进 JSON 为 252772 字节，gzip 为 12873 字节；真实容量随战斗长度、人数和记录范围而变。
+
+## 控制和查询
+
+- 游戏设置窗口的“后台自动记录战斗”开关，或 `combat_recording_configure {"enabled":false}`，持久关闭后台采集。`{"enabled":true}` 持久打开，默认连续工作；重复相同设置不会打断当前战斗。
+- `scope` 可设 `local` 或 `all`。`maxEvents` 100–50000（默认 20000）、`maxEncounters` 1–10（默认 5）控制内存缓存，配置会保存。修改这些设置会封存当前战斗并更换缓存；旧场次可从自动归档读取。
+- 兼容有期限的临时采集：`durationSeconds` 为 10–1800 时，到期会持久关闭；此模式退出登录也关闭。`durationSeconds=0` 为持续后台记录，未提供时默认 0。
+- `combat_recording_status {}` 查看 `backgroundEnabled`（持久开关）、`enabled/hooked`（当前是否实际采集）、`pausedByMutationGate`、`startError`、构建 MVID 及归档状态。原生接口无法解析或采集异常时停止自动重试；排查后重新配置或重载。
+- `combat_recording_list {}` 返回内存场次及压缩归档的 ID、结束时间、字节数和绝对路径。归档列表在后台初始化/写入后更新。
+- `combat_recording_read {"count":100}` 读取最新内存场次；没有内存记录时读取最新压缩归档。可指定 `encounterId`；将返回的 `lastId` 作为下一页 `afterId`。历史归档解压在游戏线程外执行，上限 16 MiB。
+- `combat_recording_export {}` 将最新内存场次手动导出为可直接打开的缩进 JSON，也可指定内存中的 `encounterId`。历史归档可直接 gzip 解压，或通过 read 工具分页查看。
+
+## 内容与限制
+
+原有 `combat_damage` 仅是玩家掉血采样。记录器独立于它及 500ms 事件节流，通过安装 SDK 的 `ActionEffectHandler.Receive` 复制服务端效果：来源/目标/拥有者 ID、技能 ID、本地化技能名、动作类型、序列、动画锁及每目标最多 8 条原始效果。直接伤害/治疗解码扩展数值、暴击/直击及来源标志；这些数值不保证等于实际有效伤害/治疗或 FFLogs DPS。
+
+每 100ms 采样最多 256 个战斗对象的读条、状态和死亡状态；`local` 下仅采样自身和宠物。动作/内存记录保留数量及约 8 MiB 紧凑 JSON 预算，结束标记预留一条。截断由 `droppedEvents` 报告，包队列最多 2048 条，丢弃/无效包另有计数。
+
+入战前最多保留 1.5 秒、256 条自身动作，开怪技能可出现 `elapsedMs<0` 和 `prePull=true`。启用时已在战斗标记 `partialStart=true`。事件按采集顺序分页，时间展示可按 `(timestamp,id)` 排序。切换区域、停止/重配置、退出登录及卸载会带明确原因封场。导出不含角色姓名，但包含运行时对象 ID。
+
+不覆盖周期 DoT/HoT 跳伤归因、技能请求/失败、完整机制、精确读条结束原因或极短状态。状态移除可能表示对象离开采样范围。这不是完整 FFLogs 替代品，不上传数据。
 
 ## 验证
 
-`dotnet run --project tests/CombatRecordingTest -c Release` 验证战斗闸门模型、开怪保留、分页、容量、效果数值、安装 SDK 布局和无效/跨页原生指针。另需 Debug/Release 构建、PluginLoadTest 和 ProtocolSmokeTest。离线结果不证明钩子在游戏中的行为；应先核对 `/health.buildMvid`，再有限度实测。
+`dotnet run --project tests/CombatRecordingTest -c Release` 覆盖战斗闸门、开怪保留、分页、截断、SDK 布局、原生读取边界、后台 gzip、重载后读取、清理、队列满和写盘失败。另运行 Debug/Release、PluginLoadTest、ProtocolSmokeTest。现场先核对 `/health.buildMvid`，再验证后台自动启动、实际战斗封场和归档。

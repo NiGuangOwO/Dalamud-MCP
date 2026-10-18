@@ -272,7 +272,6 @@ public sealed class Plugin : IDalamudPlugin
 
     public void StopServer()
     {
-        combatRecorder.Stop();
         if (server is not null)
         {
             try
