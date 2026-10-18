@@ -54,7 +54,7 @@ public sealed class Configuration : IPluginConfiguration
 
     /// <summary>Continuously arm the combat recorder, independently of MCP listener clients.</summary>
     public bool BackgroundCombatRecording { get; set; } = true;
-    public string CombatRecordingScope { get; set; } = "local";
+    public string CombatRecordingScope { get; set; } = "all";
     public int CombatRecordingMaxEvents { get; set; } = 20000;
     public int CombatRecordingMaxEncounters { get; set; } = 5;
 
@@ -86,7 +86,7 @@ public sealed class Configuration : IPluginConfiguration
         if (MaxObjectResults is < 1 or > 5000) MaxObjectResults = 200;
         if (MaxMemoryReadBytes is < 16 or > 1024 * 1024) MaxMemoryReadBytes = 65536;
         AuthToken ??= string.Empty;
-        if (CombatRecordingScope != "local" && CombatRecordingScope != "all") CombatRecordingScope = "local";
+        if (CombatRecordingScope != "local" && CombatRecordingScope != "all") CombatRecordingScope = "all";
         CombatRecordingMaxEvents = Math.Clamp(CombatRecordingMaxEvents, 100, 50000);
         CombatRecordingMaxEncounters = Math.Clamp(CombatRecordingMaxEncounters, 1, 10);
         Language = Localization.Normalize(Language) is { } lang ? lang : Localization.Auto;

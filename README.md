@@ -444,7 +444,7 @@ that classification does not imply that local queues or configuration remain unc
 
 ### Combat encounter recording
 
-Combat recording runs automatically in the background while mutating tools are allowed, independently of MCP clients/listener. Completed fights are compressed with 7-day, 1000-fight and 100 MiB retention limits. Five `combat_recording_*` tools inspect/configure recording and read archives after reload. See [combat recording](docs/combat-recording.md) for schemas and coverage limitations.
+Combat recording runs automatically in the background while mutating tools are allowed, independently of MCP clients/listener. New settings default to `all` nearby actors; valid saved scopes are preserved. Completed fights are compressed with 7-day, 1000-fight and 100 MiB retention limits. Five `combat_recording_*` tools inspect/configure recording and read archives after reload. See [combat recording](docs/combat-recording.md) for schemas and coverage limitations.
 
 ### Event collector
 

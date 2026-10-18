@@ -159,6 +159,13 @@ internal static class Program
             pluginConfigType?.FullName ?? "(type not found)");
 
         var config = Activator.CreateInstance(configType)!;
+        Check("new configurations default to all combat actors", Equals(Prop(config, "CombatRecordingScope"), "all"));
+        Set(config, "CombatRecordingScope", "local");
+        Invoke(config, "Sanitize");
+        Check("existing explicit local scope survives config sanitization", Equals(Prop(config, "CombatRecordingScope"), "local"));
+        Set(config, "CombatRecordingScope", "invalid");
+        Invoke(config, "Sanitize");
+        Check("invalid combat scope falls back to all", Equals(Prop(config, "CombatRecordingScope"), "all"));
         Set(config, "Port", port);
         Set(config, "Enabled", true);
         Set(config, "AutoStart", true);

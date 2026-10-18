@@ -51,13 +51,14 @@ internal sealed class CombatRecorder : IDisposable
     public CombatRecorder(ToolRegistry registry, GameServices services)
     {
         svc = services;
+        allActors = svc.Config.CombatRecordingScope == "all";
         var directory = svc.PluginInterface?.GetPluginConfigDirectory();
         if (!string.IsNullOrWhiteSpace(directory)) archive = new CombatArchive(Path.Combine(directory, "combat-recordings", "auto"));
         recording = NewRecording();
         registry.Add("combat_recording_configure", "Configure combat recording",
             "Persistently enable/disable background recording (default on). Entering combat opens an encounter; leaving combat closes and compresses it. Independent of MCP clients/listener. Resumes after login and when the mutation gate reopens. Configuration changes close/archive an active encounter; unchanged continuous settings are idempotent. " + Coverage,
             Json.Schema(("enabled", "boolean", "Enable or disable capture", true),
-                ("scope", "string", "local (default, own/pet actions plus effects targeting self), or all (nearby visible actors)", false),
+                ("scope", "string", "all (default, nearby visible actors), or local (own/pet actions plus effects targeting self); omitted preserves the saved scope", false),
                 ("maxEvents", "integer", "Events per encounter, 100-50000 (default 20000)", false),
                 ("maxEncounters", "integer", "Retained encounters, 1-10 (default 5)", false),
                 ("durationSeconds", "integer", "0=continuous (default), or 10-1800 seconds then persistently disable", false)), Configure, mutating: true);
