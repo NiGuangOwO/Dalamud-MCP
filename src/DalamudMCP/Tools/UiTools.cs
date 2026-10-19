@@ -171,16 +171,12 @@ internal static class UiTools
         registry.Add(
             "list_addon_elements",
             "List addon (UI window) elements",
-            "Walks a loaded addon's UI node tree and reports its clickable elements: node id, " +
-            "type, label text, screen rectangle, and visible/enabled state. Pass 'addon' as a " +
-            "name from get_addon_state's allowlist, or 'addonId' as the raw AtkUnitBase id. " +
-            "Use the returned nodeId with click_addon_element. Read-only.",
-            Json.Schema(
-                ("addon", "string", "Addon name to inspect (same names open_addon accepts)", false),
-                ("addonId", "integer", "Raw AtkUnitBase id of the addon to inspect (overrides addon)", false),
-                ("maxDepth", "integer", "Maximum node-tree depth to walk (default 12)", false),
-                ("maxNodes", "integer", "Maximum elements to report (default 100)", false),
-                ("allNodes", "boolean", "Report every node, not just labeled/clickable ones (default false)", false)),
+            "Read nodes in any loaded native addon; discover exact names with list_loaded_addons. " +
+            "For ordinary lookup use label/componentType filters and detail=compact. Copy nodeId and " +
+            "componentPath to click_addon_element or get_addon_node_snapshot; IDs alone can repeat. " +
+            "Filters run before the result limit. truncated/scanIncomplete mean absence or uniqueness " +
+            "cannot be established. Full detail and unfiltered behavior remain the default. Read-only.",
+            ElementQuerySchema(),
             args => ListAddonElements(args));
 
         CheckboxTools.Register(registry);
@@ -198,6 +194,7 @@ internal static class UiTools
                 ("addonId", "integer", "Raw AtkUnitBase id of the addon to click inside (overrides addon)", false),
                 ("nodeId", "integer", "Target node id from list_addon_elements", false),
                 ("componentId", "integer", "Optional top-level component node id. Resolve nodeId only inside this component, avoiding duplicate child ids elsewhere in the addon.", false),
+                ("componentPath", "array of integer", "Exact component path from list_addon_elements, outermost first (0-40 ids). Empty means top-level only. Do not combine with componentId; ambiguous paths are refused. Re-query after addon replacement.", false),
                 ("index", "integer", "For list components: the item index to click instead of a nodeId", false),
                 ("event", "string", "Which event to dispatch: click (default), doubleClick, buttonClick, buttonPress, buttonRelease, or 'registered' to fire every handler the node has registered (closest to a real mouse click)", false),
                 ("param", "integer", "Override the event callback param (uint32). Advanced: the game normally derives it from the node's registered handler; ClickLib-style close buttons need 0xFFFFFFFF (-1)", false)),
@@ -477,6 +474,26 @@ internal static class UiTools
 
     // ---------------------------------------------------------------- addon element tools
 
+    private static JObject ElementQuerySchema()
+    {
+        var schema = Json.Schema(
+            ("addon", "string", "Exact loaded addon name from list_loaded_addons; not restricted by open_addon.", false),
+            ("addonId", "integer", "Raw loaded-addon id (overrides addon).", false),
+            ("maxDepth", "integer", "Maximum component nesting depth, 1-40 (default 12).", false),
+            ("maxNodes", "integer", "Maximum matching results, 1-500 (default 100).", false),
+            ("allNodes", "boolean", "Include unlabeled/nonclickable nodes (default false).", false),
+            ("label", "string", "Trimmed case-insensitive exact label, up to 256 characters.", false),
+            ("containsMatch", "boolean", "Use label substring matching (default false); returns all matches, never auto-selects.", false),
+            ("componentType", "string", "Filter by native widget kind, e.g. Button or CheckBox.", false),
+            ("visibleOnly", "boolean", "Only visible nodes (default false).", false),
+            ("enabledOnly", "boolean", "Only enabled nodes (default false).", false),
+            ("clickableOnly", "boolean", "Only nodes classified clickable (default false).", false),
+            ("detail", "string", "compact omits geometry/type/depth; full preserves diagnostic fields (default full).", false));
+        schema["properties"]!["detail"]!["enum"] = new JArray("compact", "full");
+        schema["properties"]!["componentType"]!["enum"] = new JArray(Enum.GetNames<ComponentType>());
+        return schema;
+    }
+
     private static unsafe object ListAddonElements(JObject args)
     {
         var addonName = args["addon"]?.Value<string>();
@@ -484,6 +501,9 @@ internal static class UiTools
         var maxDepth = ClampInt(args["maxDepth"], 1, 40, 12);
         var maxNodes = ClampInt(args["maxNodes"], 1, 500, 100);
         var allNodes = args["allNodes"]?.Value<bool>() ?? false;
+        var query = new AddonElementQuery(args, maxNodes);
+        if (args["componentType"] is { } kind && !Enum.GetNames<ComponentType>().Contains(kind.Value<string>(), StringComparer.OrdinalIgnoreCase))
+            throw new ToolException("componentType must be a native widget kind from the tool schema");
 
         var unit = ResolveAddon(addonName, addonIdArg);
         if (unit is null)
@@ -493,10 +513,8 @@ internal static class UiTools
             if (mgr is not null)
                 loaded = DescribeLoadedAddons(mgr);
             return addonName is not null
-                ? Json.ToolError($"no loaded addon named '{addonName}' was found; open it with " +
-                                 $"open_addon first, or pass the addon's raw addonId.{loaded}")
-                : Json.ToolError("no addon resolved; pass 'addon' (a name from the open_addon " +
-                                 "allowlist) or 'addonId'");
+                ? Json.ToolError($"no loaded addon named '{addonName}' was found; discover current names with list_loaded_addons.{loaded}")
+                : Json.ToolError("no addon resolved; pass an exact loaded 'addon' name or 'addonId'");
         }
 
         var root = unit->RootNode;
@@ -509,23 +527,21 @@ internal static class UiTools
             };
         }
 
-        var elements = new JArray();
-        var truncated = false;
-        var visited = new HashSet<nuint>();
         // Top-level nodes live in the addon's UldManager node list (an array), not in the
         // RootNode's child chain — RootNode->ChildCount (e.g. 110) far exceeds the one
         // linked child, so the authoritative enumeration is UldManager.NodeList. The list
         // also contains nested nodes, so a visited set keeps the child/sibling descent from
         // emitting the same node twice.
         var uldNodeCount = Math.Min((int)unit->UldManager.NodeListCount, 512);
-        for (var i = 0; i < uldNodeCount && !truncated; i++)
+        if (unit->UldManager.NodeListCount > 512) query.ScanIncomplete = true;
+        for (var i = 0; i < uldNodeCount && !query.ResultLimit; i++)
         {
-            var n = unit->UldManager.NodeList[i];
-            WalkNode(n, unit, 0, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+            if (!TryNative((nint*)unit->UldManager.NodeList + i, out var address)) { query.ScanIncomplete = true; break; }
+            WalkNode((AtkResNode*)address, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>());
         }
 
-        if (elements.Count == 0)
-            WalkNode(root, unit, 0, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+        if (!query.ResultLimit)
+            WalkNode(root, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>());
 
         return new JObject
         {
@@ -534,8 +550,11 @@ internal static class UiTools
             ["x"] = (int)unit->X,
             ["y"] = (int)unit->Y,
             ["scale"] = (float)unit->Scale,
-            ["truncated"] = truncated,
-            ["elements"] = elements,
+            ["truncated"] = query.Truncated,
+            ["scanIncomplete"] = query.ScanIncomplete,
+            ["scannedNodes"] = query.Visited.Count,
+            ["returned"] = query.Elements.Count,
+            ["elements"] = query.Elements,
         };
     }
 
@@ -547,6 +566,8 @@ internal static class UiTools
         var indexArg = args["index"];
         var eventName = args["event"]?.Value<string>() ?? "click";
         var paramArg = args["param"];
+        var path = AddonProbeTools.ReadComponentPath(args);
+        if (path != null && nodeIdArg == null) throw new ToolException("componentPath requires nodeId");
 
         AtkEventType? eventType = eventName switch
         {
@@ -610,8 +631,8 @@ internal static class UiTools
         // prefer a visible + clickable node; a bare Res/text match is the last resort.
         var scoped = args.Value<uint?>("componentId");
         var bestScore = 0;
-        var node = scoped.HasValue ? AddonProbeTools.FindNode(unit, nodeId, scoped) : FindBestInUld(unit, nodeId, out bestScore);
-        if (!scoped.HasValue && (node is null || bestScore < 3))
+        var node = scoped.HasValue || path != null ? AddonProbeTools.FindNode(unit, nodeId, scoped, path) : FindBestInUld(unit, nodeId, out bestScore);
+        if (!scoped.HasValue && path == null && (node is null || bestScore < 3))
         {
             var fromRoot = FindBestNode(unit->RootNode, nodeId, out var rootScore);
             if (rootScore > bestScore)
@@ -1149,36 +1170,29 @@ internal static class UiTools
         }
     }
 
-    /// <summary>Depth-first walk collecting clickable/labeled elements into <paramref name="elements"/>.</summary>
+    /// <summary>Bounded ULD traversal with filtering and component scope projection.</summary>
     private static unsafe void WalkNode(
         AtkResNode* node,
         AtkUnitBase* unit,
         int depth,
         int maxDepth,
-        int maxNodes,
         bool allNodes,
-        JArray elements,
-        ref bool truncated,
-        HashSet<nuint> visited)
+        AddonElementQuery query,
+        uint[] componentPath)
     {
-        if (node is null || truncated || depth > maxDepth)
+        if (node is null || query.ResultLimit)
             return;
-        if (visited.Count >= 4096) { truncated = true; return; }
-        if (!visited.Add((nuint)node))
+        if (query.Visited.Contains((nuint)node)) return;
+        if (depth > maxDepth || query.Visited.Count >= 4096) { query.ScanIncomplete = true; return; }
+        if (!query.Visited.Add((nuint)node))
             return;
-        if (!TryNative(node, out var nodeData)) return;
+        if (!TryNative(node, out var nodeData)) { query.ScanIncomplete = true; return; }
 
         var label = NodeLabel(node);
         var clickable = NodeClickable(node);
         if (allNodes || label is not null || clickable)
         {
-            if (elements.Count >= maxNodes)
-            {
-                truncated = true;
-                return;
-            }
-
-            elements.Add(NodeJson(node, unit, label, clickable, depth));
+            query.Add(NodeJson(node, unit, label, clickable, depth), componentPath);
         }
 
         // A component node's contents live on the component's UldManager node list (its
@@ -1195,11 +1209,16 @@ internal static class UiTools
                 var compCount = Math.Min((int)compUld.NodeListCount, 512);
                 if (compCount > 0 && compUld.NodeList is not null)
                 {
-                    for (var i = 0; i < compCount && !truncated; i++)
+                    var path = componentPath.Append(nodeData.NodeId).ToArray();
+                    if (compUld.NodeListCount > 512) query.ScanIncomplete = true;
+                    for (var i = 0; i < compCount && !query.ResultLimit; i++)
                         if (TryNative((nint*)compUld.NodeList + i, out var child))
-                            WalkNode((AtkResNode*)child, unit, depth + 1, maxDepth, maxNodes, allNodes, elements, ref truncated, visited);
+                            WalkNode((AtkResNode*)child, unit, depth + 1, maxDepth, allNodes, query, path);
+                        else query.ScanIncomplete = true;
                 }
+                else if (compCount > 0) query.ScanIncomplete = true;
             }
+            else query.ScanIncomplete = true;
         }
 
         // ULD node arrays are authoritative. Child/sibling chains may contain aliases,

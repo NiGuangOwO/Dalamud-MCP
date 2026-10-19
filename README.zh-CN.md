@@ -321,7 +321,7 @@ FFXIVClientStructs 静态地址解析器尚未初始化时，相关工具返回�
 | `open_addon` | 通过所属 agent 的 `AgentInterface.Show()` 请求打开允许列表中的游戏窗口。未知或不支持打开的名称会被拒绝；操作控件前应确认窗口已加载并就绪。 | `addon`（必填，允许列表枚举） |
 | `close_addon` | 通过 `AgentInterface.Hide()` 关闭允许列表中的 addon。窗口未打开时不执行操作。 | `addon`（必填，枚举） |
 | `get_addon_state` | 查询允许列表中 agent 的活动状态，返回 `active` 和 `inactive` 名称列表。只读。 | 无 |
-| `list_addon_elements` | 使用有界节点枚举读取已加载 addon 的节点 ID、类型、标签、尺寸、位置和可点击状态，组件节点另行返回运行时组件类型。 | `addon` 或 `addonId`、`maxDepth`（默认 12）、`maxNodes`（默认 100） |
+| `list_addon_elements` | 在任意已加载 addon 中先筛选再限制结果数量。普通定位使用 `detail=compact`；完整模式保留几何信息。返回可精确定位的 `componentPath`。见 [addon 查询](docs/addon-queries.md)。 | `addon` 或 `addonId`、`label`、`containsMatch`、`componentType`、`visibleOnly`、`enabledOnly`、`clickableOnly`、`detail`、`allNodes`、`maxDepth`（12）、`maxNodes`（100） |
 | `click_addon_element` | 通过 `ReceiveEvent` 派发 Atk UI 事件。支持 `click`、`doubleClick`、`buttonClick`、`buttonPress`、`buttonRelease` 和 `registered`；实际效果取决于目标节点及其监听器。 | `addon` 或 `addonId`、`nodeId` 或 `index`、`event`、`param`（高级覆盖） |
 | `get_addon_strings` | 读取 addon 的 `AtkValue` 字符串和标量值，返回索引、类型及解码后的值，并对控制字符转义。只读。 | `addon` 或 `addonId`、`maxValues`（1-500，默认 200）、`stringsOnly` |
 | `select_addon_menu_item` | 按标签或索引选择菜单型 addon 的条目，并通过其回调提交选择。默认采用归一化后的精确匹配，可通过 `containsMatch` 启用包含匹配。 | `addon` 或 `addonId`、`label` 或 `index`、`containsMatch`、`dryRun` |

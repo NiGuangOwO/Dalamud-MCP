@@ -25,6 +25,7 @@ internal sealed class AddonProbeTools : IDisposable
         var schema = Json.Schema(
             ("addon", "string", "Exact internal name of a loaded addon, e.g. Hummer.", true),
             ("componentId", "integer", "Optional top-level component node id; scopes nodeIds to that component's UldManager.", false),
+            ("componentPath", "array of integer", "Exact component path from list_addon_elements, outermost first (0-40 ids). Empty means top-level. Do not combine with componentId.", false),
             ("nodeIds", "array of integer", "Top-level UldManager node ids (1-32 unique ids). Component children are deliberately excluded to avoid ambiguous ids.", true));
         registry.Add("get_addon_node_snapshot", "Read precise addon node state",
             "Reads local and screen geometry, native transform matrices, origins, parent ids, visibility, node addresses, animation timelines and the addon's scalar values together on the framework thread. No input or memory writes.",
@@ -41,6 +42,7 @@ internal sealed class AddonProbeTools : IDisposable
                 ("addon", "string", "Exact internal addon name.", true),
                 ("observeNodeId", "integer", "Top-level node whose width is observed.", true),
                 ("clickNodeId", "integer", "Top-level visible and enabled node to click once.", true),
+                ("componentPath", "array of integer", "Optional exact component path from list_addon_elements (0-40 ids); applies to every observed/clicked node.", false),
                 ("minWidth", "integer", "Inclusive minimum width, 0-65535; required without targetNodeId.", false),
                 ("maxWidth", "integer", "Inclusive maximum width, 0-65535; required without targetNodeId.", false),
                 ("targetNodeId", "integer", "Optional top-level target marker. Match the observed right edge against its transformed horizontal center.", false),
@@ -73,33 +75,49 @@ internal sealed class AddonProbeTools : IDisposable
         return unit != null && string.Equals(unit->NameString, name, StringComparison.Ordinal) && unit->IsReady ? unit : null;
     }
 
-    internal static unsafe AtkResNode* FindNode(AtkUnitBase* unit, uint id, uint? componentId = null)
+    internal static uint[]? ReadComponentPath(JObject args)
     {
-        var uld = &unit->UldManager;
-        if (componentId is { } parentId)
+        if (args["componentPath"] == null) return null;
+        if (args["componentId"] != null) throw new ToolException("use componentPath or componentId, not both");
+        if (args["componentPath"] is not JArray path || path.Count > 40)
+            throw new ToolException("componentPath must be an array of 0-40 unsigned node ids");
+        var result = new uint[path.Count];
+        for (var i = 0; i < path.Count; i++)
         {
-            var parent = FindNode(unit, parentId);
-            if (parent == null || (int)parent->Type < 1000) return null;
-            var component = ((AtkComponentNode*)parent)->Component;
-            if (component == null) return null;
-            uld = &component->UldManager;
+            if (path[i].Type != JTokenType.Integer || !uint.TryParse(path[i].ToString(), out result[i]))
+                throw new ToolException("componentPath must contain only unsigned integer node ids");
         }
-        for (var i = 0; i < Math.Min((int)uld->NodeListCount, 4096); i++)
-        {
-            var node = uld->NodeList[i];
-            if (node != null && node->NodeId == id) return node;
-        }
-        return null;
+        return result;
     }
 
-    private static unsafe JObject Snapshot(string name, uint[] ids, uint? componentId = null)
+    internal static unsafe AtkResNode* FindNode(AtkUnitBase* unit, uint id, uint? componentId = null, uint[]? componentPath = null)
+    {
+        var owner = MemoryProbe.TryReadStruct<AtkUnitBase>((ulong)unit, out _);
+        if (!owner.HasValue) return null;
+        var uld = owner.Value.UldManager;
+        var path = componentPath ?? (componentId.HasValue ? new[] { componentId.Value } : Array.Empty<uint>());
+        var visited = new HashSet<nuint>();
+        foreach (var parentId in path)
+        {
+            var parent = CheckboxTools.Find(uld, parentId);
+            if (parent == null || !visited.Add((nuint)parent)) return null;
+            var node = MemoryProbe.TryReadStruct<AtkComponentNode>((ulong)parent, out _);
+            if (!node.HasValue || (int)node.Value.Type < 1000) return null;
+            var component = MemoryProbe.TryReadStruct<AtkComponentBase>((ulong)node.Value.Component, out _);
+            if (!component.HasValue || (nint)component.Value.OwnerNode != (nint)parent) return null;
+            uld = component.Value.UldManager;
+        }
+        return CheckboxTools.Find(uld, id);
+    }
+
+    private static unsafe JObject Snapshot(string name, uint[] ids, uint? componentId = null, uint[]? componentPath = null)
     {
         var unit = Resolve(name);
         if (unit == null) return new JObject { ["available"] = false, ["addon"] = name };
         var nodes = new JArray();
         foreach (var id in ids)
         {
-            var node = FindNode(unit, id, componentId);
+            var node = FindNode(unit, id, componentId, componentPath);
             if (node == null) { nodes.Add(new JObject { ["nodeId"] = id, ["available"] = false }); continue; }
             var timeline = node->Timeline;
             var events = new JArray();
@@ -154,7 +172,7 @@ internal sealed class AddonProbeTools : IDisposable
         };
     }
 
-    private static object Read(JObject args) => Snapshot(args.Value<string>("addon") ?? "", Ids(args), args.Value<uint?>("componentId"));
+    private static object Read(JObject args) => Snapshot(args.Value<string>("addon") ?? "", Ids(args), args.Value<uint?>("componentId"), ReadComponentPath(args));
 
     private Task<object?> ClickWhen(JObject args)
     {
@@ -210,6 +228,7 @@ internal sealed class AddonProbeTools : IDisposable
             ["event"] = args.Value<string>("event") ?? "buttonPress",
         };
         if (args["param"] is { Type: not JTokenType.Null } param) clickArgs["param"] = param;
+        if (args["componentPath"] != null) clickArgs["componentPath"] = args["componentPath"]!.DeepClone();
         return Sample(sampleArgs, clickArgs);
     }
 
@@ -218,6 +237,7 @@ internal sealed class AddonProbeTools : IDisposable
         var ids = Ids(args);
         var name = args.Value<string>("addon") ?? "";
         var componentId = args.Value<uint?>("componentId");
+        var componentPath = ReadComponentPath(args);
         var frames = args.Value<int?>("frames") ?? 180;
         var interval = args.Value<int?>("intervalFrames") ?? 1;
         if (frames is < 1 or > 600 || interval is < 1 or > 60)
@@ -237,7 +257,7 @@ internal sealed class AddonProbeTools : IDisposable
             try
             {
                 if (lifetime.IsCancellationRequested) { done.TrySetCanceled(); return; }
-                var snapshot = Snapshot(name, ids, componentId);
+                var snapshot = Snapshot(name, ids, componentId, componentPath);
                 var currentIdentity = $"{snapshot["address"]}:{snapshot["addonId"]}";
                 if (snapshot.Value<bool>("available") != true || (identity != null && identity != currentIdentity))
                 {

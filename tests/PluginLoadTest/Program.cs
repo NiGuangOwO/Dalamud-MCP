@@ -426,6 +426,30 @@ internal static class Program
             var listText = await ListAllToolsAsync(http, baseUrl, sessionId).ConfigureAwait(false);
             var listed = CountToolEntries(listText);
             Check($"tools/list returns {ExpectedTools} tools over the real socket", listed == ExpectedTools, $"found {listed}");
+            using (var addonCatalog = JsonDocument.Parse(listText))
+            {
+                var toolsList = addonCatalog.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToArray();
+                var querySchema = toolsList.Single(t => t.GetProperty("name").GetString() == "list_addon_elements")
+                    .GetProperty("inputSchema").GetProperty("properties");
+                Check("addon query advertises server-side filters and explicit detail enum",
+                    querySchema.TryGetProperty("label", out _) && querySchema.TryGetProperty("visibleOnly", out _) &&
+                    querySchema.GetProperty("detail").GetProperty("enum").EnumerateArray().Select(v => v.GetString()).SequenceEqual(new[] { "compact", "full" }));
+                foreach (var name in new[] { "click_addon_element", "get_addon_node_snapshot", "sample_addon_nodes", "click_addon_when_node_matches" })
+                {
+                    var pathSchema = toolsList.Single(t => t.GetProperty("name").GetString() == name)
+                        .GetProperty("inputSchema").GetProperty("properties").GetProperty("componentPath");
+                    Check(name + " accepts discovered integer component paths", pathSchema.GetProperty("type").GetString() == "array" &&
+                        pathSchema.GetProperty("items").GetProperty("type").GetString() == "integer");
+                }
+            }
+            foreach (var queryArguments in new object[] { new { detail = "tiny" }, new { visibleOnly = "false" }, new { containsMatch = true } })
+            {
+                var queryReply = await CallAsync(http, baseUrl, sessionId,
+                    JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 220, method = "tools/call",
+                        @params = new { name = "list_addon_elements", arguments = queryArguments } })).ConfigureAwait(false);
+                var (_, queryError) = UnwrapToolResult(queryReply);
+                Check("invalid addon query rejected before accessing inert native services: " + JsonSerializer.Serialize(queryArguments), queryError);
+            }
 
             var callText = await CallAsync(
                 http, baseUrl, sessionId,

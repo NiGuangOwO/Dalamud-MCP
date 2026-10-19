@@ -10,12 +10,12 @@ unsafe class Program
     static void Check(bool ok,string label){if(!ok)throw new Exception(label);checks++;Console.WriteLine("PASS: "+label);}
     static int Offset(Type t,string field)=>t.GetField(field)!.GetCustomAttribute<FieldOffsetAttribute>()!.Value;
     static int Size(Type t)=>t.GetField("StructSize")?.GetRawConstantValue() is int size ? size : Marshal.SizeOf(t);
-    static int Main()
+    static int Main(string[] cliArgs)
     {
         var sdk=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"XIVLauncherCN","addon","Hooks","dev");
         AppDomain.CurrentDomain.AssemblyResolve+=(_,e)=>{var path=Path.Combine(sdk,new AssemblyName(e.Name).Name+".dll");return File.Exists(path)?Assembly.LoadFrom(path):null;};
         var repo=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"../../../../../"));
-        var plugin=Assembly.LoadFrom(Path.Combine(repo,"src/DalamudMCP/bin/x64/Debug/DalamudMCP.dll"));
+        var plugin=Assembly.LoadFrom(cliArgs.Length>0?Path.GetFullPath(cliArgs[0]):Path.Combine(repo,"src/DalamudMCP/bin/x64/Debug/DalamudMCP.dll"));
         Console.WriteLine("Build MVID: "+plugin.ManifestModule.ModuleVersionId);
         var fcs=Assembly.LoadFrom(Path.Combine(sdk,"FFXIVClientStructs.dll"));
         Type T(string name)=>fcs.GetType("FFXIVClientStructs.FFXIV.Component.GUI."+name)!;
@@ -42,11 +42,16 @@ unsafe class Program
             Marshal.WriteIntPtr(node,Offset(nodeType,"ChildNode"),1);
             Marshal.WriteIntPtr(node,Offset(nodeType,"NextSiblingNode"),node);
             var json=Assembly.LoadFrom(Path.Combine(sdk,"Newtonsoft.Json.dll"));
-            var elements=Activator.CreateInstance(json.GetType("Newtonsoft.Json.Linq.JArray")!);
+            var queryType=plugin.GetType("DalamudMCP.Tools.AddonElementQuery")!;
+            var jtype=json.GetType("Newtonsoft.Json.Linq.JObject")!;var parse=jtype.GetMethod("Parse",new[]{typeof(string)})!;
+            object Query(string input="{}",int max=100)=>Activator.CreateInstance(queryType,BindingFlags.Instance|BindingFlags.NonPublic,null,new object?[]{parse.Invoke(null,new[]{input}),max},null)!;
+            object Elements(object query)=>queryType.GetProperty("Elements",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(query)!;
+            int Count(object query)=>(int)Elements(query).GetType().GetProperty("Count")!.GetValue(Elements(query))!;
+            var query=Query();
             var walk=ui.GetMethod("WalkNode",BindingFlags.NonPublic|BindingFlags.Static)!;
-            object?[] args={Pointer.Box((void*)node,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,100,true,elements,false,new HashSet<nuint>()};
+            object?[] args={Pointer.Box((void*)node,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,query,Array.Empty<uint>()};
             walk.Invoke(null,args);
-            Check((int)elements!.GetType().GetProperty("Count")!.GetValue(elements)! == 1,"walker ignores invalid child and cyclic sibling links");
+            Check(Count(query)==1,"walker ignores invalid child and cyclic sibling links");
             var listType=T("AtkComponentList");var compNodeType=T("AtkComponentNode");var compType=T("AtkComponentBase");
             var compNode=Allocate(Size(compNodeType));var list=Allocate(Size(listType));var info=Allocate(Size(T("AtkUldComponentInfo")));
             Marshal.WriteInt16(compNode,Offset(nodeType,"Type"),1000);Marshal.WriteIntPtr(compNode,Offset(compNodeType,"Component"),list);
@@ -153,13 +158,59 @@ unsafe class Program
             Marshal.WriteInt16(unit,unitUld+Offset(uld,"NodeListCount"),2);
             Check(FindCheckbox(3)==0,"ambiguous checkbox node ids refused");
             var boolean=checkboxApi.GetMethod("StrictBoolean",BindingFlags.NonPublic|BindingFlags.Static)!;
-            var jtype=json.GetType("Newtonsoft.Json.Linq.JObject")!;var parse=jtype.GetMethod("Parse",new[]{typeof(string)})!;
             bool Bool(string input)=> (bool)boolean.Invoke(null,new object?[]{parse.Invoke(null,new[]{input}),"checked",null})!;
             Check(Bool("{\"checked\":true}")&&!Bool("{\"checked\":false}"),"checkbox accepts native JSON booleans");
             foreach(var input in new[]{"{}","{\"checked\":null}","{\"checked\":1}","{\"checked\":\"false\"}"}){
                 var refused=false;try{Bool(input);}catch(TargetInvocationException e){refused=e.InnerException?.GetType().Name=="ToolException";}
                 Check(refused,"checkbox missing/coerced boolean refused: "+input);
             }
+            // Child IDs resolve by their discovered ULD path, never by a global fallback.
+            var probe=plugin.GetType("DalamudMCP.Tools.AddonProbeTools")!;
+            var findNode=probe.GetMethod("FindNode",BindingFlags.NonPublic|BindingFlags.Static)!;
+            nint Resolve(uint id,uint[] path)=>(nint)Pointer.Unbox(findNode.Invoke(null,new object?[]{Pointer.Box((void*)unit,findNode.GetParameters()[0].ParameterType),id,null,path})!);
+            Marshal.WriteIntPtr(unit,unitUld+Offset(uld,"NodeList"),nodeArray);
+            Marshal.WriteInt16(unit,unitUld+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteInt32(node,Offset(nodeType,"NodeId"),2);
+            var children=Allocate(8);Marshal.WriteIntPtr(children,node);
+            Marshal.WriteIntPtr(checkbox,uldOffset+Offset(uld,"NodeList"),children);
+            Marshal.WriteInt16(checkbox,uldOffset+Offset(uld,"NodeListCount"),1);
+            Check(Resolve(3,Array.Empty<uint>())==compNode&&Resolve(2,new uint[]{3})==node,"scoped resolver uses exact top-level and component ULD arrays");
+            var innerNode=Allocate(Size(compNodeType));var inner=Allocate(Size(compType));
+            Marshal.WriteInt16(innerNode,Offset(nodeType,"Type"),1000);
+            Marshal.WriteInt32(innerNode,Offset(nodeType,"NodeId"),5);
+            Marshal.WriteIntPtr(innerNode,Offset(compNodeType,"Component"),inner);
+            Marshal.WriteIntPtr(inner,Offset(compType,"OwnerNode"),innerNode);
+            var innerChildren=Allocate(8);Marshal.WriteIntPtr(innerChildren,node);
+            Marshal.WriteIntPtr(inner,uldOffset+Offset(uld,"NodeList"),innerChildren);
+            Marshal.WriteInt16(inner,uldOffset+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteIntPtr(children,innerNode);
+            Check(Resolve(2,new uint[]{3,5})==node&&Resolve(2,new uint[]{3})==0,"nested component path prevents a same-id fallback into another scope");
+            var scopedQuery=Query("{\"allNodes\":true,\"detail\":\"compact\"}");
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)compNode,walk.GetParameters()[0].ParameterType),Pointer.Box((void*)unit,walk.GetParameters()[1].ParameterType),0,12,true,scopedQuery,Array.Empty<uint>()});
+            Check(Elements(scopedQuery).ToString()!.Replace(" ","").Replace("\r","").Replace("\n","").Contains("\"componentPath\":[3,5]"),"native discovery preserves the full nested component path");
+            var limitedQuery=Query();
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)compNode,walk.GetParameters()[0].ParameterType),Pointer.Box((void*)unit,walk.GetParameters()[1].ParameterType),0,0,true,limitedQuery,Array.Empty<uint>()});
+            Check((bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(limitedQuery)!&&Count(limitedQuery)==1,"depth-limited native traversal explicitly reports incomplete coverage");
+            Marshal.WriteIntPtr(inner,Offset(compType,"OwnerNode"),1);
+            Check(Resolve(2,new uint[]{3,5})==0,"component path refuses mismatched native ownership");
+            Marshal.WriteIntPtr(inner,Offset(compType,"OwnerNode"),innerNode);
+            var duplicated=Allocate(16);Marshal.WriteIntPtr(duplicated,node);Marshal.WriteIntPtr(duplicated,8,node);
+            Marshal.WriteIntPtr(inner,uldOffset+Offset(uld,"NodeList"),duplicated);
+            Marshal.WriteInt16(inner,uldOffset+Offset(uld,"NodeListCount"),2);
+            Check(Resolve(2,new uint[]{3,5})==0,"component path refuses duplicate IDs within one scope");
+            Marshal.WriteIntPtr(inner,uldOffset+Offset(uld,"NodeList"),innerChildren);
+            Marshal.WriteInt16(inner,uldOffset+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteIntPtr(innerChildren,compNode);
+            Check(Resolve(2,new uint[]{3,5,3})==0,"component path refuses cyclic native ownership traversal");
+            Marshal.WriteIntPtr(innerChildren,node);
+            var pathMethod=probe.GetMethod("ReadComponentPath",BindingFlags.NonPublic|BindingFlags.Static)!;
+            foreach(var input in new[]{"{\"componentPath\":[-1]}","{\"componentPath\":[\"3\"]}","{\"componentPath\":[4294967296]}","{\"componentPath\":null}","{\"componentPath\":[],\"componentId\":3}"}){
+                var refused=false;try{pathMethod.Invoke(null,new[]{parse.Invoke(null,new[]{input})});}catch(TargetInvocationException e){refused=e.InnerException?.GetType().Name=="ToolException";}
+                Check(refused,"malformed/conflicting component path refused: "+input);
+            }
+            var tooDeep="{\"componentPath\":["+string.Join(',',Enumerable.Repeat("3",41))+"]}";
+            var pathRefused=false;try{pathMethod.Invoke(null,new[]{parse.Invoke(null,new[]{tooDeep})});}catch(TargetInvocationException e){pathRefused=e.InnerException?.GetType().Name=="ToolException";}
+            Check(pathRefused,"component path length is bounded before native traversal");
             var tableType=Assembly.LoadFrom(Path.Combine(sdk,"Dalamud.dll")).GetType("Dalamud.Game.Addon.Lifecycle.AddonVirtualTable")!;
             var table=System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(tableType);
             var tableFlags=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance;
