@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 115;
+    private const int ExpectedTools = 118;
 
     private static int checks;
     private static int failures;
@@ -188,6 +188,9 @@ internal static class Program
         // must come back both times or the remove-vs-add pairing on Dispose is meaningless.
         object? uiBuilder = null;
         var frameworkUpdates = new List<Delegate>();
+        object? exposedFixture = null;
+        var uiOpenRequests = 0;
+        object? CountUiOpen() { uiOpenRequests++; return null; }
 
         object? Handler(MethodInfo method, object?[]? args)
         {
@@ -207,6 +210,19 @@ internal static class Program
                     return uiBuilder ??= Proxy(
                         method.ReturnType,
                         (m, a) => UiHandler(m, a));
+
+                case "get_InstalledPlugins":
+                    var exposedType = method.ReturnType.GetGenericArguments()[0];
+                    exposedFixture ??= Proxy(exposedType, (m, a) => m.Name switch
+                    {
+                        "get_Name" or "get_InternalName" => "RuntimeDiscoveryFixture",
+                        "get_IsLoaded" or "get_HasMainUi" => true,
+                        "OpenMainUi" => CountUiOpen(),
+                        _ => Default(m.ReturnType),
+                    });
+                    var exposedArray = Array.CreateInstance(exposedType, 1);
+                    exposedArray.SetValue(exposedFixture, 0);
+                    return exposedArray;
 
                 case "Information":
                 case "Debug":
@@ -239,6 +255,12 @@ internal static class Program
 
                 case "RunOnFrameworkThread":
                     return RunInline(method, args);
+
+                case "get_Commands":
+                    var runtimeCommands = (IDictionary)Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(
+                        typeof(string), method.ReturnType.GetGenericArguments()[1]))!;
+                    foreach (var pair in commandInfos) runtimeCommands.Add(pair.Key, pair.Value);
+                    return Activator.CreateInstance(method.ReturnType, new object[] { runtimeCommands });
 
                 case "AddHandler":
                     if (args is { Length: > 0 } && args[0] is string command)
@@ -426,6 +448,36 @@ internal static class Program
             var listText = await ListAllToolsAsync(http, baseUrl, sessionId).ConfigureAwait(false);
             var listed = CountToolEntries(listText);
             Check($"tools/list returns {ExpectedTools} tools over the real socket", listed == ExpectedTools, $"found {listed}");
+            var discoveredCommand = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new { jsonrpc="2.0",id=230,method="tools/call",@params=new {
+                    name="list_plugin_commands",arguments=new {query="/dalamudmcp",limit=1} } })).ConfigureAwait(false);
+            var (commandPayload, commandError) = UnwrapToolResult(discoveredCommand);
+            using (var commandDoc = JsonDocument.Parse(commandPayload ?? "{}"))
+                Check("command discovery reads the actually registered command without executing it", !commandError &&
+                    commandDoc.RootElement.GetProperty("commands")[0].GetProperty("command").GetString()=="/dalamudmcp" &&
+                    chatMessages.Count==0);
+            var noPluginUi = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new {jsonrpc="2.0",id=231,method="tools/call",@params=new {
+                    name="open_plugin_ui",arguments=new {pluginName="nonexistent",ui="main"} } })).ConfigureAwait(false);
+            Check("UI discovery refuses absent plugin rather than guessing a slash command", UnwrapToolResult(noPluginUi).IsError);
+            var fixtureUi = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new {jsonrpc="2.0",id=233,method="tools/call",@params=new {
+                    name="open_plugin_ui",arguments=new {pluginName="RuntimeDiscoveryFixture",ui="main"} } })).ConfigureAwait(false);
+            Check("supported public UI callback is invoked exactly once", !UnwrapToolResult(fixtureUi).IsError && uiOpenRequests==1);
+            var unavailableUi = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new {jsonrpc="2.0",id=234,method="tools/call",@params=new {
+                    name="open_plugin_ui",arguments=new {pluginName="RuntimeDiscoveryFixture",ui="config"} } })).ConfigureAwait(false);
+            Check("unsupported UI callback is refused without invoking a handler", UnwrapToolResult(unavailableUi).IsError && uiOpenRequests==1);
+            Set(config,"AllowMutatingTools",false);
+            var gatedUi = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new {jsonrpc="2.0",id=235,method="tools/call",@params=new {
+                    name="open_plugin_ui",arguments=new {pluginName="RuntimeDiscoveryFixture",ui="main"} } })).ConfigureAwait(false);
+            Check("closed mutation gate blocks UI opening before invocation", UnwrapToolResult(gatedUi).IsError && uiOpenRequests==1);
+            Set(config,"AllowMutatingTools",true);
+            var tribalOffline = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new {jsonrpc="2.0",id=232,method="tools/call",@params=new {
+                    name="get_tribal_quest_state",arguments=new {} } })).ConfigureAwait(false);
+            Check("tribal state refuses logged-out clients before native access", UnwrapToolResult(tribalOffline).IsError);
             using (var addonCatalog = JsonDocument.Parse(listText))
             {
                 var toolsList = addonCatalog.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToArray();

@@ -154,6 +154,8 @@ public sealed class Plugin : IDalamudPlugin
         ChatTools.Register(registry, services);
         QuestTools.Register(registry, services);
         PluginManagementTools.Register(registry, services);
+        PluginDiscoveryTools.Register(registry, services);
+        TribalQuestTools.Register(registry, services);
         DevPluginTools.Register(registry, services);
         PluginBridgeTools.Register(registry, services, ipcHub);
         EventTools.Register(registry, services, eventHub);

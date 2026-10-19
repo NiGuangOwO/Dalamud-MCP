@@ -8,7 +8,7 @@ unsafe class Program
     [DllImport("kernel32.dll")] static extern bool VirtualFree(nint address,nuint size,uint type);
     static int checks;
     static void Check(bool ok,string label){if(!ok)throw new Exception(label);checks++;Console.WriteLine("PASS: "+label);}
-    static int Offset(Type t,string field)=>t.GetField(field)!.GetCustomAttribute<FieldOffsetAttribute>()!.Value;
+    static int Offset(Type t,string field)=>t.GetField(field,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)!.GetCustomAttribute<FieldOffsetAttribute>()!.Value;
     static int Size(Type t)=>t.GetField("StructSize")?.GetRawConstantValue() is int size ? size : Marshal.SizeOf(t);
     static int Main(string[] cliArgs)
     {
@@ -211,6 +211,21 @@ unsafe class Program
             var tooDeep="{\"componentPath\":["+string.Join(',',Enumerable.Repeat("3",41))+"]}";
             var pathRefused=false;try{pathMethod.Invoke(null,new[]{parse.Invoke(null,new[]{tooDeep})});}catch(TargetInvocationException e){pathRefused=e.InnerException?.GetType().Name=="ToolException";}
             Check(pathRefused,"component path length is bounded before native traversal");
+            var questManagerType=fcs.GetType("FFXIVClientStructs.FFXIV.Client.Game.QuestManager")!;
+            var managerMemory=Allocate(Size(questManagerType));
+            var repType=fcs.GetType("FFXIVClientStructs.FFXIV.Application.Network.WorkDefinitions.BeastReputationWork")!;
+            var repOffset=Offset(questManagerType,"_beastReputation");
+            Marshal.WriteByte(managerMemory,repOffset+Offset(repType,"Rank"),4);
+            Marshal.WriteInt16(managerMemory,repOffset+Offset(repType,"Value"),123);
+            var managerBox=Marshal.PtrToStructure(managerMemory,questManagerType)!;
+            var sdkRep=questManagerType.GetMethod("GetBeastReputationById")!;
+            var reputationPtr=(nint)Pointer.Unbox(sdkRep.Invoke(managerBox,new object[]{1U})!);
+            Check(Marshal.ReadByte(reputationPtr,Offset(repType,"Rank"))==4&&Marshal.ReadInt16(reputationPtr,Offset(repType,"Value"))==123,"installed SDK reputation accessor resolves the correct synthetic work record");
+            var allowanceMethod=plugin.GetType("DalamudMCP.Tools.TribalQuestTools")!.GetMethod("ReadAllowance",BindingFlags.NonPublic|BindingFlags.Static)!;
+            object?[] allowanceArgs={Pointer.Box((void*)managerMemory,allowanceMethod.GetParameters()[0].ParameterType),null};
+            var allowance=allowanceMethod.Invoke(null,allowanceArgs);
+            Check(allowance==null&&((string?)allowanceArgs[1])?.Contains("GetBeastTribeAllowance")==true,"unresolved SDK allowance function returns unknown with its reason, never a fabricated quota");
+            GC.KeepAlive(managerBox);
             var tableType=Assembly.LoadFrom(Path.Combine(sdk,"Dalamud.dll")).GetType("Dalamud.Game.Addon.Lifecycle.AddonVirtualTable")!;
             var table=System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(tableType);
             var tableFlags=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance;

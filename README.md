@@ -492,6 +492,9 @@ Each entry includes the channel (`XivChatType`), sender, message, relation types
 | --- | --- | --- |
 | `plugin_list` | Lists the plugins Dalamud reports, with load state and a manifest summary, paged by cursor. | `query`, `cursor`, `limit` (1-100, default 50) |
 | `plugin_describe` | Reports one plugin's manifest in full: author, description, version, repository, tags and load state. | `pluginName` (required) |
+| `list_plugin_commands` | Reads registered command help from the running client, including hidden-help commands; never invokes handlers. Handler assembly is a hint, not a complete ownership map. | `query`, `cursor`, `limit` (1-100, default 30) |
+| `open_plugin_ui` | Requests one exact loaded plugin's public main/config UI callback. Check resulting UI separately. | `pluginName` (required), `ui` (`main`/`config`, default `main`) |
+| `get_tribal_quest_state` | Reads actual remaining tribal allowance, guarded reputation records and the daily quest ledger using the installed SDK and localized game sheets. | none |
 
 ## Safety model
 

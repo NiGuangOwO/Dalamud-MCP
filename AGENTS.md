@@ -10,6 +10,14 @@ If a task needs a missing capability, first check the complete catalog and mutat
 
 User and project-specific restrictions on game input, computer use, spending, commits and pushes remain authoritative. Do not inherit another developer's authorization from an example or an audit report. Keep the skill, server instructions and tool schemas consistent when capabilities change.
 
+## Discover target-plugin features through MCP
+
+When testing or operating another plugin, do not read that target plugin's local source code to discover commands, IPC contracts, UI callbacks, module names or behavior. This includes searching its checkout or consulting previously captured source excerpts. Source-derived knowledge from earlier runs is not current runtime evidence; rediscover the entry point through MCP.
+
+Use MCP to inspect the loaded plugin/version, registered command help, plugin-provided help/UI, current addon or ImGui controls, notifications and documented runtime IPC metadata as available. Confirm the intended action, its arguments and the current target before invoking it. An MCP-maintained list of explicitly registered IPC endpoints is not a complete inventory of a target plugin's runtime IPC providers. Do not guess command names, IPC signatures or callback arguments to compensate for missing discovery.
+
+If the complete tool catalog and mutation gate show that the required discovery is unavailable, first extend Dalamud-MCP with a bounded, reusable runtime discovery tool, validate it offline, verify the running build, and then resume the original task. Prefer capabilities such as plugin-scoped command/help discovery or supported plugin UI opening over hardcoded commands for an individual module. Reading Dalamud-MCP's own implementation and the installed SDK to implement these capabilities remains permitted; target-plugin source remains outside the testing workflow. Confirm completion from resulting game/plugin state rather than dispatch success.
+
 ## Required release after plugin updates
 
 The repository owner authorizes unattended versioning and publication for each completed, validated update to the DalamudMCP plugin. A source push alone does not complete such an update: increment the plugin version, build the release package, create a GitHub Release, and publish the same package to `NiGuangOwO/DalamudPlugins`. Follow [the release procedure](docs/releasing.md), including remote index and package verification. Do not ask for publication approval again within this scope. Report failures accurately instead of treating a dispatched workflow as publication success.

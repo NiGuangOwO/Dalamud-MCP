@@ -476,6 +476,9 @@ FFXIVClientStructs 静态地址解析器尚未初始化时，相关工具返回�
 | --- | --- | --- |
 | `plugin_list` | 列出 Dalamud 报告的插件，含加载状态与 manifest 摘要，按游标分页。 | `query`、`cursor`、`limit`（1-100，默认 50） |
 | `plugin_describe` | 完整报告一个插件的 manifest：作者、描述、版本、仓库、标签与加载状态。 | `pluginName`（必需） |
+| `list_plugin_commands` | 从运行中的命令注册表读取帮助，包括不显示在帮助列表中的命令；不会调用处理器。处理器程序集仅作为归属线索。 | `query`、`cursor`、`limit`（1-100，默认 30） |
+| `open_plugin_ui` | 请求精确匹配的已加载插件打开其公开主界面或设置界面；须另行读取界面验证结果。 | `pluginName`（必需）、`ui`（`main`/`config`，默认 `main`） |
+| `get_tribal_quest_state` | 使用已安装 SDK 和本地化游戏数据表读取实际部族受理限额、有界友好度记录和日常任务账本。 | 无 |
 
 ## 安全模型
 
