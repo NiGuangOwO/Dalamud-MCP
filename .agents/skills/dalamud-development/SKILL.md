@@ -1,11 +1,11 @@
 ---
 name: dalamud-development
-description: Develop and debug Dalamud/FFXIV plugins with live Dalamud-MCP observations, addon UI nodes and callbacks, IPC, and build verification. Use for runtime investigation or in-game validation (Dalamud 插件开发、游戏内调试); skip unrelated C# work and documentation-only edits.
+description: Develop and debug Dalamud/FFXIV plugins with live DalamudMCP observations, addon UI nodes and callbacks, IPC, and build verification. Use for runtime investigation or in-game validation (Dalamud 插件开发、游戏内调试); skip unrelated C# work and documentation-only edits.
 ---
 
-# Develop with Dalamud-MCP
+# Develop with DalamudMCP
 
-Use the connected Dalamud-MCP server to answer runtime questions and validate a plugin against the game. Source editing and builds still use normal development tools. Follow the user's game-interaction restrictions and existing authorization; installing this skill does not authorize new actions, commits or pushes.
+Use the connected DalamudMCP server to answer runtime questions and validate a plugin against the game. Source editing and builds still use normal development tools. Follow the user's game-interaction restrictions and existing authorization; installing this skill does not authorize new actions, commits or pushes.
 
 ## Orient and choose tools
 

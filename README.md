@@ -215,7 +215,7 @@ dotnet build bridge\DalamudMcpBridge\DalamudMcpBridge.csproj -c Release
 {
   "mcpServers": {
     "dalamud": {
-      "command": "C:\\path\\to\\Dalamud-MCP\\bridge\\DalamudMcpBridge\\bin\\Release\\net10.0\\dalamud-mcp-bridge.exe"
+      "command": "C:\\path\\to\\DalamudMCP\\bridge\\DalamudMcpBridge\\bin\\Release\\net10.0\\dalamud-mcp-bridge.exe"
     }
   }
 }

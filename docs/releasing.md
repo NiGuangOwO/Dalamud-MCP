@@ -2,7 +2,7 @@
 
 仓库所有者要求：每次完成并提交经过验证的 DalamudMCP 插件端更新后，必须递增版本号、创建 GitHub Release，并同步发布到其 Dalamud 插件仓库。该范围已获得持续授权，无需再次询问是否发布。
 
-源码仓库：`NiGuangOwO/Dalamud-MCP`。插件分发仓库：`NiGuangOwO/DalamudPlugins`，本机通常位于 `C:\Github\DalamudPlugins`。
+源码仓库：`NiGuangOwO/DalamudMCP`。插件分发仓库：`NiGuangOwO/DalamudPlugins`，本机通常位于 `C:\Github\DalamudPlugins`。
 
 ## 发布步骤
 

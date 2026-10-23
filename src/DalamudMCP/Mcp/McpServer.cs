@@ -633,7 +633,7 @@ public sealed class McpServer : IDisposable
                         ["title"] = "Dalamud MCP",
                     },
                     ["instructions"] =
-                        "Use Dalamud-MCP proactively for Dalamud/FFXIV plugin runtime investigation, native addon UI " +
+                        "Use DalamudMCP proactively for Dalamud/FFXIV plugin runtime investigation, native addon UI " +
                         "nodes/callbacks, IPC and in-game validation. If installed, use the dalamud-development skill " +
                         "for the development workflow. Start with get_client_state and get_local_player; when the client " +
                         "is unavailable, continue independent source/build work and report the live-validation gap. " +

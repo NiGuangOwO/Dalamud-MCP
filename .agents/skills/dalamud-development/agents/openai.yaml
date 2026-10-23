@@ -1,6 +1,6 @@
 interface:
   display_name: "Dalamud Development"
-  short_description: "Develop and validate FFXIV plugins with Dalamud-MCP"
+  short_description: "Develop and validate FFXIV plugins with DalamudMCP"
 
 dependencies:
   tools:

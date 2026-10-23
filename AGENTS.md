@@ -1,6 +1,6 @@
-# Working on Dalamud-MCP
+# Working on DalamudMCP
 
-For Dalamud/FFXIV runtime investigation, addon UI/callback debugging, IPC, or in-game validation, use the available Dalamud-MCP tools proactively. Read [.agents/skills/dalamud-development/SKILL.md](.agents/skills/dalamud-development/SKILL.md) for the workflow. Routine documentation edits and source-only changes need no live game interaction.
+For Dalamud/FFXIV runtime investigation, addon UI/callback debugging, IPC, or in-game validation, use the available DalamudMCP tools proactively. Read [.agents/skills/dalamud-development/SKILL.md](.agents/skills/dalamud-development/SKILL.md) for the workflow. Routine documentation edits and source-only changes need no live game interaction.
 
 Use the connected tool schemas as the parameter reference; follow `tools/list` pagination. Begin live work with `get_client_state` and `get_local_player`. If MCP is unavailable, continue independent source/build work and report the live-validation gap. Do not infer game results from a successful dispatch.
 
@@ -16,7 +16,7 @@ When testing or operating another plugin, do not read that target plugin's local
 
 Use MCP to inspect the loaded plugin/version, registered command help, plugin-provided help/UI, current addon or ImGui controls, notifications and documented runtime IPC metadata as available. Confirm the intended action, its arguments and the current target before invoking it. An MCP-maintained list of explicitly registered IPC endpoints is not a complete inventory of a target plugin's runtime IPC providers. Do not guess command names, IPC signatures or callback arguments to compensate for missing discovery.
 
-If the complete tool catalog and mutation gate show that the required discovery is unavailable, first extend Dalamud-MCP with a bounded, reusable runtime discovery tool, validate it offline, verify the running build, and then resume the original task. Prefer capabilities such as plugin-scoped command/help discovery or supported plugin UI opening over hardcoded commands for an individual module. Reading Dalamud-MCP's own implementation and the installed SDK to implement these capabilities remains permitted; target-plugin source remains outside the testing workflow. Confirm completion from resulting game/plugin state rather than dispatch success.
+If the complete tool catalog and mutation gate show that the required discovery is unavailable, first extend DalamudMCP with a bounded, reusable runtime discovery tool, validate it offline, verify the running build, and then resume the original task. Prefer capabilities such as plugin-scoped command/help discovery or supported plugin UI opening over hardcoded commands for an individual module. Reading DalamudMCP's own implementation and the installed SDK to implement these capabilities remains permitted; target-plugin source remains outside the testing workflow. Confirm completion from resulting game/plugin state rather than dispatch success.
 
 ## Required release after plugin updates
 

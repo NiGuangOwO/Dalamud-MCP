@@ -1,6 +1,6 @@
 # Dalamud runtime development
 
-When a task depends on live FFXIV state, addon UI nodes/callbacks, plugin IPC, or in-game validation, proactively use the connected Dalamud-MCP server and the `dalamud-development` skill. Do not wait for the user to say "use MCP". Read `.agents/skills/dalamud-development/SKILL.md` when installed in this project, or use the installed user-scoped skill.
+When a task depends on live FFXIV state, addon UI nodes/callbacks, plugin IPC, or in-game validation, proactively use the connected DalamudMCP server and the `dalamud-development` skill. Do not wait for the user to say "use MCP". Read `.agents/skills/dalamud-development/SKILL.md` when installed in this project, or use the installed user-scoped skill.
 
 Start live work with `get_client_state` and `get_local_player`. Read the available tool schemas and complete catalog; mutating tools may be hidden by configuration. After building a development plugin, use `load_dev_plugin` to verify the running build before test commands. Verify resulting game state after dispatching an action.
 

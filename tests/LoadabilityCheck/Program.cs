@@ -51,7 +51,7 @@ internal static class Program
     {
         var repo = FindRepoRoot()
             ?? throw new InvalidOperationException(
-                "could not locate the Dalamud-MCP repository (walked up from "
+                "could not locate the DalamudMCP repository (walked up from "
                 + AppContext.BaseDirectory + "); set DALAMUD_MCP_REPO to the checkout root");
         var devDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

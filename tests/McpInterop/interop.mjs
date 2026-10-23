@@ -1,4 +1,4 @@
-// Talks to the REAL Dalamud-MCP server using the OFFICIAL @modelcontextprotocol/sdk (v1.30.1).
+// Talks to the REAL DalamudMCP server using the OFFICIAL @modelcontextprotocol/sdk (v1.30.1).
 //
 // Why this matters: every check in tests\* speaks JSON-RPC that this project's author wrote by
 // hand. If the framing were misread - a wrong header name, a session id in the wrong place, a

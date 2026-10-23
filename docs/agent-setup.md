@@ -1,8 +1,8 @@
 # Agent setup / Agent 接入
 
-Dalamud-MCP provides live tools. The `dalamud-development` skill teaches agents when and how to combine them. `AGENTS.md` provides project routing. None of these alone installs the game plugin or guarantees that every agent client will automatically select the skill.
+DalamudMCP provides live tools. The `dalamud-development` skill teaches agents when and how to combine them. `AGENTS.md` provides project routing. None of these alone installs the game plugin or guarantees that every agent client will automatically select the skill.
 
-Dalamud-MCP 提供实时工具；`dalamud-development` Skill 说明何时调用、如何组合与验证；`AGENTS.md` 提供项目入口。三者配合使用。安装 Skill 不等于连接 MCP，也不会自动安装游戏插件或授予操作权限。
+DalamudMCP 提供实时工具；`dalamud-development` Skill 说明何时调用、如何组合与验证；`AGENTS.md` 提供项目入口。三者配合使用。安装 Skill 不等于连接 MCP，也不会自动安装游戏插件或授予操作权限。
 
 ## 1. Connect the MCP server / 连接 MCP
 
@@ -29,9 +29,9 @@ The canonical source is `.agents/skills/dalamud-development/`. Codex discovers `
 
 Skill 源码放在 `.agents/skills/dalamud-development/`。在本仓库内运行 Codex 时，可通过标准项目目录发现它；其他客户端应按其规范安装或注册 Skill，不能假设所有 Agent 都读取相同路径。
 
-For another plugin repository, run the following **from a Dalamud-MCP checkout**, replacing only the target project path. It copies the whole self-contained skill, including references and metadata, and refuses to overwrite an existing installation:
+For another plugin repository, run the following **from a DalamudMCP checkout**, replacing only the target project path. It copies the whole self-contained skill, including references and metadata, and refuses to overwrite an existing installation:
 
-安装到其他插件仓库时，在 Dalamud-MCP 仓库中执行以下命令，修改目标项目路径。复制整个目录以保留参考文件；遇到已有安装会停止，避免覆盖本地修改。
+安装到其他插件仓库时，在 DalamudMCP 仓库中执行以下命令，修改目标项目路径。复制整个目录以保留参考文件；遇到已有安装会停止，避免覆盖本地修改。
 
 ```powershell
 $skillSource = (Resolve-Path '.agents/skills/dalamud-development').Path
