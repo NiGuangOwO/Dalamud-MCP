@@ -1150,7 +1150,7 @@ internal static class Program
         Check("invoking the chat command does not throw", commandHandler is null,
             commandHandler is null ? string.Empty : $"{commandHandler.GetType().Name}: {commandHandler.Message}");
 
-        var statusLine = chatMessages.LastOrDefault(m => m.Contains("[Dalamud MCP]", StringComparison.Ordinal));
+        var statusLine = chatMessages.LastOrDefault(m => m.Contains("[DalamudMCP]", StringComparison.Ordinal));
         Check("the status subcommand reports the listener state",
             statusLine is not null && statusLine.Contains("running on", StringComparison.OrdinalIgnoreCase)
             && statusLine.Contains(port.ToString(), StringComparison.Ordinal),

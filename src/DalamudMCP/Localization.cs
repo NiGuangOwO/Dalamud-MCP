@@ -46,7 +46,7 @@ public static class Localization
     private static readonly IReadOnlyDictionary<string, string> EnglishTable = MakeReadOnly(new Dictionary<string, string>
     {
         // ------------------------------------------------------ command / toasts
-        ["cmd.help"] = "Dalamud MCP: open settings (/dalamudmcp start|stop|restart|status|port <n>).",
+        ["cmd.help"] = "DalamudMCP: open settings (/dalamudmcp start|stop|restart|status|port <n>).",
         ["cmd.listeningOn"] = "listening on {0}",
         ["cmd.startFailed"] = "could not start on port {0}; see /xllog",
         ["cmd.stopped"] = "stopped",
@@ -60,10 +60,10 @@ public static class Localization
         ["cmd.portUsage"] = "usage: {0} port <1024-65535>",
         ["cmd.toolsRegistered"] = "{0} tools registered: {1}",
         ["cmd.unknownSubcommand"] = "unknown subcommand '{0}'. Try: start, stop, restart, status, port <n>, tools",
-        ["toast.bindFailed"] = "Dalamud MCP could not bind port {0}. See /xllog.",
+        ["toast.bindFailed"] = "DalamudMCP could not bind port {0}. See /xllog.",
 
         // ------------------------------------------------------------ config UI
-        ["ui.title"] = "Dalamud MCP###DalamudMCPConfig",
+        ["ui.title"] = "DalamudMCP###DalamudMCPConfig",
         ["ui.enabled"] = "Enabled",
         ["ui.autoStart"] = "Auto-start with the plugin",
         ["ui.port"] = "Port",
@@ -105,7 +105,7 @@ public static class Localization
     private static readonly IReadOnlyDictionary<string, string> ChineseTable = MakeReadOnly(new Dictionary<string, string>
     {
         // ------------------------------------------------------ command / toasts
-        ["cmd.help"] = "Dalamud MCP：打开设置（/dalamudmcp start|stop|restart|status|port <n>）。",
+        ["cmd.help"] = "DalamudMCP：打开设置（/dalamudmcp start|stop|restart|status|port <n>）。",
         ["cmd.listeningOn"] = "正在监听 {0}",
         ["cmd.startFailed"] = "无法在端口 {0} 启动；详见 /xllog",
         ["cmd.stopped"] = "已停止",
@@ -119,10 +119,10 @@ public static class Localization
         ["cmd.portUsage"] = "用法：{0} port <1024-65535>",
         ["cmd.toolsRegistered"] = "已注册 {0} 个工具：{1}",
         ["cmd.unknownSubcommand"] = "未知子命令“{0}”。可用：start, stop, restart, status, port <n>, tools",
-        ["toast.bindFailed"] = "Dalamud MCP 无法绑定端口 {0}。详见 /xllog。",
+        ["toast.bindFailed"] = "DalamudMCP 无法绑定端口 {0}。详见 /xllog。",
 
         // ------------------------------------------------------------ config UI
-        ["ui.title"] = "Dalamud MCP###DalamudMCPConfig",
+        ["ui.title"] = "DalamudMCP###DalamudMCPConfig",
         ["ui.enabled"] = "启用",
         ["ui.autoStart"] = "随插件自动启动",
         ["ui.port"] = "端口",

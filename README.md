@@ -1,10 +1,10 @@
-# Dalamud MCP
+# DalamudMCP
 
-<img src="src/DalamudMCP/images/icon.png" width="96" height="96" alt="Dalamud MCP crystal and connection emblem" />
+<img src="src/DalamudMCP/images/icon.png" width="96" height="96" alt="DalamudMCP crystal and connection emblem" />
 
 English | [简体中文](README.zh-CN.md)
 
-Dalamud MCP is a [Dalamud](https://github.com/goatcorp/Dalamud) plugin for FINAL FANTASY XIV.
+DalamudMCP is a [Dalamud](https://github.com/goatcorp/Dalamud) plugin for FINAL FANTASY XIV.
 It provides a local [Model Context Protocol](https://modelcontextprotocol.io) server for AI-assisted
 plugin development, runtime inspection and in-game validation.
 
@@ -44,7 +44,7 @@ https://raw.githubusercontent.com/NiGuangOwO/DalamudPlugins/main/pluginmaster.js
 
 1. Launch the game with Dalamud enabled. Enter `/xlsettings` in chat to open Dalamud settings.
 2. Under `Experimental`, locate `Custom Plugin Repositories`. Add the index URL above and save the settings.
-3. Enter `/xlplugins` to open the Plugin Installer. Refresh the list and install **Dalamud MCP**
+3. Enter `/xlplugins` to open the Plugin Installer. Refresh the list and install **DalamudMCP**
    by **NiGuangOwO**. Subsequent releases are available through the same installer.
 4. Enter `/dalamudmcp status` to inspect listener status, or `/dalamudmcp` to open plugin settings.
 
@@ -120,7 +120,7 @@ Loading and automatic-start options are managed through the Plugin Installer.
 
 ## Configure
 
-Open **Dalamud MCP** settings with `/dalamudmcp` or the Plugin Installer's configuration button.
+Open **DalamudMCP** settings with `/dalamudmcp` or the Plugin Installer's configuration button.
 
 | Setting | Default | Description |
 | --- | --- | --- |

@@ -1,4 +1,4 @@
-# Dalamud MCP logo
+# DalamudMCP logo
 
 The cyan crystal represents the game client; three connection terminals form an M-shaped frame for the protocol bridge, with a crimson lunar arc behind the crystal. The midnight background and text-free silhouette keep the icon readable at plugin-list sizes.
 

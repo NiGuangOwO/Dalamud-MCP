@@ -221,7 +221,7 @@ namespace DalamudMcpBridge
             catch (Exception ex)
             {
                 Console.Error.WriteLine(
-                    $"[bridge] cannot reach the Dalamud MCP plugin at {options.BaseUrl}: {ex.Message}");
+                    $"[bridge] cannot reach the DalamudMCP plugin at {options.BaseUrl}: {ex.Message}");
                 Console.Error.WriteLine(
                     "[bridge] start FFXIV, load the plugin, and confirm the listener is running (/dalamudmcp status).");
                 return 1;

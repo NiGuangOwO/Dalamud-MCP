@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "1.0.0",
-  "description": "Talks to the Dalamud MCP server with the OFFICIAL @modelcontextprotocol/sdk, so the protocol framing is checked by somebody else's implementation of the spec.",
+  "description": "Talks to the DalamudMCP server with the OFFICIAL @modelcontextprotocol/sdk, so the protocol framing is checked by somebody else's implementation of the spec.",
   "scripts": {
     "interop": "node interop.mjs",
     "negative": "node negative.mjs"

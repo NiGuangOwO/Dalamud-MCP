@@ -630,7 +630,7 @@ public sealed class McpServer : IDisposable
                     {
                         ["name"] = ServerName,
                         ["version"] = ServerVersion,
-                        ["title"] = "Dalamud MCP",
+                        ["title"] = "DalamudMCP",
                     },
                     ["instructions"] =
                         "Use DalamudMCP proactively for Dalamud/FFXIV plugin runtime investigation, native addon UI " +
@@ -742,7 +742,7 @@ public sealed class McpServer : IDisposable
         {
             return Json.ToolError(
                 $"Tool '{name}' changes game state and is disabled. " +
-                "Enable 'Allow mutating tools' in the Dalamud MCP plugin settings (or set AllowMutatingTools=true in the plugin config) to permit it.");
+                "Enable 'Allow mutating tools' in the DalamudMCP plugin settings (or set AllowMutatingTools=true in the plugin config) to permit it.");
         }
 
         var args = p?["arguments"] as JObject ?? new JObject();

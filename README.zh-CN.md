@@ -1,10 +1,10 @@
-# Dalamud MCP
+# DalamudMCP
 
-<img src="src/DalamudMCP/images/icon.png" width="96" height="96" alt="Dalamud MCP 水晶与连接节点标志" />
+<img src="src/DalamudMCP/images/icon.png" width="96" height="96" alt="DalamudMCP 水晶与连接节点标志" />
 
 [English](README.md) | 简体中文
 
-Dalamud MCP 是适用于 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatcorp/Dalamud) 插件，
+DalamudMCP 是适用于 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatcorp/Dalamud) 插件，
 通过本地 [Model Context Protocol](https://modelcontextprotocol.io) 服务器，为 AI 辅助插件开发、运行时分析和游戏内验证提供接口。
 
 插件运行于游戏进程内部，通过 Dalamud 服务和 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs)
@@ -41,7 +41,7 @@ https://raw.githubusercontent.com/NiGuangOwO/DalamudPlugins/main/pluginmaster.js
 
 1. 启用 Dalamud 后启动游戏，在聊天框输入 `/xlsettings` 打开 Dalamud 设置。
 2. 进入 `Experimental`（实验性功能），在 `Custom Plugin Repositories`（自定义插件仓库）中添加上述地址并保存。
-3. 输入 `/xlplugins` 打开插件安装器，刷新列表后安装作者为 **NiGuangOwO** 的 **Dalamud MCP**。
+3. 输入 `/xlplugins` 打开插件安装器，刷新列表后安装作者为 **NiGuangOwO** 的 **DalamudMCP**。
    后续版本通过同一安装器更新。
 4. 输入 `/dalamudmcp status` 检查监听器状态，或输入 `/dalamudmcp` 打开插件设置。
 
@@ -114,7 +114,7 @@ dotnet build src\DalamudMCP\DalamudMCP.csproj -p:Platform=x64 -c Release
 
 ## 配置
 
-通过 `/dalamudmcp` 或插件安装器的配置按钮打开 **Dalamud MCP** 设置窗口。
+通过 `/dalamudmcp` 或插件安装器的配置按钮打开 **DalamudMCP** 设置窗口。
 
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |

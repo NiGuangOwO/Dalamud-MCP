@@ -2,7 +2,7 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
 
   <PropertyGroup>
-    <Version>1.0.0.9</Version>
+    <Version>1.0.0.10</Version>
     <!--
       Plugin manifest. DalamudPackager (pulled in by the SDK) reads these properties and
       writes DalamudMCP.json next to the assembly on every build:
@@ -11,7 +11,7 @@
       See https://github.com/goatcorp/DalamudPackager
     -->
     <Author>NiGuangOwO</Author>
-    <Name>Dalamud MCP</Name>
+    <Name>DalamudMCP</Name>
     <Punchline>Expose FFXIV game memory to AI agents over MCP.</Punchline>
     <Description>Hosts a Model Context Protocol (MCP) server on a local port so that agents can read FINAL FANTASY XIV game memory via Dalamud and FFXIVClientStructs.</Description>
     <RepoUrl>https://github.com/NiGuangOwO/DalamudMCP</RepoUrl>

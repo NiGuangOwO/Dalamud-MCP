@@ -281,7 +281,7 @@ public sealed class ConfigWindow : Window
         }
 
         ImGui.BeginGroup();
-        ImGui.TextUnformatted("Dalamud MCP");
+        ImGui.TextUnformatted("DalamudMCP");
         DrawStatus();
         ImGui.EndGroup();
     }

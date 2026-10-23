@@ -361,7 +361,7 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void Print(string message) => chatGui.Print($"[Dalamud MCP] {message}", "DalamudMCP", null);
+    private void Print(string message) => chatGui.Print($"[DalamudMCP] {message}", "DalamudMCP", null);
 
     private void LogInfo(string message) => log.Information("[DalamudMCP] {Message}", message);
 
