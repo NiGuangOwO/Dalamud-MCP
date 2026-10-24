@@ -38,13 +38,15 @@ internal sealed class AddonElementQuery
 
     internal JArray Elements { get; } = new();
     internal HashSet<nuint> Visited { get; } = new();
+    internal Dictionary<nint, bool?> VisibilityCache { get; } = new();
     internal bool ResultLimit { get; private set; }
     internal bool ScanIncomplete { get; set; }
     internal bool Truncated => ResultLimit || ScanIncomplete;
 
     internal void Add(JObject element, IReadOnlyList<uint> componentPath)
     {
-        if (visibleOnly && element.Value<bool>("visible") != true ||
+        if (element["visible"]?.Type == JTokenType.Null) ScanIncomplete = true;
+        if (visibleOnly && element.Value<bool?>("visible") != true ||
             enabledOnly && element.Value<bool>("enabled") != true ||
             clickableOnly && element.Value<bool>("clickable") != true) return;
         if (componentType != null && !string.Equals(componentType, element.Value<string>("componentType"), StringComparison.OrdinalIgnoreCase)) return;

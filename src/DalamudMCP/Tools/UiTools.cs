@@ -175,7 +175,9 @@ internal static class UiTools
             "For ordinary lookup use label/componentType filters and detail=compact. Copy nodeId and " +
             "componentPath to click_addon_element or get_addon_node_snapshot; IDs alone can repeat. " +
             "Filters run before the result limit. truncated/scanIncomplete mean absence or uniqueness " +
-            "cannot be established. Full detail and unfiltered behavior remain the default. Read-only.",
+            "cannot be established. visible includes addon, parent and component-scope visibility; full detail " +
+            "also reports selfVisible. Unreadable/cyclic ancestry returns visible=null and scanIncomplete=true. " +
+            "Full detail and unfiltered behavior remain the default. Read-only.",
             ElementQuerySchema(),
             args => ListAddonElements(args));
 
@@ -486,7 +488,7 @@ internal static class UiTools
             ("label", "string", "Trimmed case-insensitive exact label, up to 256 characters.", false),
             ("containsMatch", "boolean", "Use label substring matching (default false); returns all matches, never auto-selects.", false),
             ("componentType", "string", "Filter by native widget kind, e.g. Button or CheckBox.", false),
-            ("visibleOnly", "boolean", "Only visible nodes (default false).", false),
+            ("visibleOnly", "boolean", "Only effectively visible nodes, including addon, ancestors and owning components (default false). Unknown visibility is excluded.", false),
             ("enabledOnly", "boolean", "Only enabled nodes (default false).", false),
             ("clickableOnly", "boolean", "Only nodes classified clickable (default false).", false),
             ("detail", "string", "compact omits geometry/type/depth; full preserves diagnostic fields (default full).", false));
@@ -538,11 +540,11 @@ internal static class UiTools
         for (var i = 0; i < uldNodeCount && !query.ResultLimit; i++)
         {
             if (!TryNative((nint*)unit->UldManager.NodeList + i, out var address)) { query.ScanIncomplete = true; break; }
-            WalkNode((AtkResNode*)address, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>());
+            WalkNode((AtkResNode*)address, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>(), unit->IsVisible);
         }
 
         if (!query.ResultLimit)
-            WalkNode(root, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>());
+            WalkNode(root, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>(), unit->IsVisible);
 
         return new JObject
         {
@@ -597,6 +599,9 @@ internal static class UiTools
                                  "allowlist) or 'addonId'");
         }
 
+        if (!unit->IsReady || !unit->IsVisible)
+            return Json.ToolError("addon is not ready or is hidden");
+
         // List-item shortcut: index into a list component dispatches the item event directly.
         if (indexArg is not null && nodeIdArg is null)
         {
@@ -646,7 +651,8 @@ internal static class UiTools
         if (node is null)
             return Json.ToolError($"no node with id {nodeId} was found in this addon; list it " +
                                   "with list_addon_elements");
-        if (!NodeVisible(node))
+        if (NativeUiVisibility.Combine(ScopeVisibility(unit, path ?? (scoped.HasValue ? new[] { scoped.Value } : null)),
+                NativeUiVisibility.Read((nint)node)) != true)
             return Json.ToolError($"node {nodeId} is not currently visible");
         if (IsComponentType(node) && ComponentKindOf((AtkComponentNode*)node) == ComponentType.CheckBox)
             return Json.ToolError("Use set_addon_checkbox with an explicit checked boolean; addon event dispatch alone does not update native checkbox state");
@@ -1179,7 +1185,8 @@ internal static class UiTools
         int maxDepth,
         bool allNodes,
         AddonElementQuery query,
-        uint[] componentPath)
+        uint[] componentPath,
+        bool? scopeVisibility)
     {
         if (node is null || query.ResultLimit)
             return;
@@ -1189,11 +1196,14 @@ internal static class UiTools
             return;
         if (!TryNative(node, out var nodeData)) { query.ScanIncomplete = true; return; }
 
+        var visible = NativeUiVisibility.Combine(scopeVisibility, NativeUiVisibility.Read((nint)node, query.VisibilityCache));
+        if (visible == null) query.ScanIncomplete = true;
+
         var label = NodeLabel(node);
         var clickable = NodeClickable(node);
         if (allNodes || label is not null || clickable)
         {
-            query.Add(NodeJson(node, unit, label, clickable, depth), componentPath);
+            query.Add(NodeJson(node, unit, label, clickable, depth, visible), componentPath);
         }
 
         // A component node's contents live on the component's UldManager node list (its
@@ -1214,7 +1224,7 @@ internal static class UiTools
                     if (compUld.NodeListCount > 512) query.ScanIncomplete = true;
                     for (var i = 0; i < compCount && !query.ResultLimit; i++)
                         if (TryNative((nint*)compUld.NodeList + i, out var child))
-                            WalkNode((AtkResNode*)child, unit, depth + 1, maxDepth, allNodes, query, path);
+                            WalkNode((AtkResNode*)child, unit, depth + 1, maxDepth, allNodes, query, path, visible);
                         else query.ScanIncomplete = true;
                 }
                 else if (compCount > 0) query.ScanIncomplete = true;
@@ -1227,7 +1237,7 @@ internal static class UiTools
     }
 
 
-    private static unsafe JObject NodeJson(AtkResNode* node, AtkUnitBase* unit, string? label, bool clickable, int depth)
+    private static unsafe JObject NodeJson(AtkResNode* node, AtkUnitBase* unit, string? label, bool clickable, int depth, bool? visible)
     {
         return new JObject
         {
@@ -1240,7 +1250,8 @@ internal static class UiTools
             ["y"] = (int)node->ScreenY,
             ["width"] = (int)node->Width,
             ["height"] = (int)node->Height,
-            ["visible"] = NodeVisible(node),
+            ["visible"] = visible,
+            ["selfVisible"] = (node->NodeFlags & NodeFlags.Visible) != 0,
             ["enabled"] = (node->NodeFlags & NodeFlags.Enabled) != 0,
             ["clickable"] = clickable,
         };
@@ -1267,13 +1278,33 @@ internal static class UiTools
         IsComponentType(node) ? (AtkComponentNode*)node : null;
 
     /// <summary>
-    /// Pure field read of NodeFlags.Visible. Replaces the native <c>AtkResNode.IsVisible()</c>
+    /// Guarded effective visibility. Replaces the native <c>AtkResNode.IsVisible()</c>
     /// member function: that helper is a reverse P/Invoke into the client and dereferences
     /// <c>this</c>, so a stale pointer raises a native access violation that
     /// <c>catch (Exception)</c> cannot intercept — it terminates ffxiv_dx11.exe.
     /// </summary>
-    private static unsafe bool NodeVisible(AtkResNode* node) =>
-        TryNative(node, out var data) && (data.NodeFlags & NodeFlags.Visible) != 0;
+    private static unsafe bool NodeVisible(AtkResNode* node) => NativeUiVisibility.Read((nint)node) == true;
+
+    internal static unsafe bool? ScopeVisibility(AtkUnitBase* unit, uint[]? path,
+        Dictionary<nint, bool?>? cache = null)
+    {
+        var owner = MemoryProbe.TryReadStruct<AtkUnitBase>((ulong)unit, out _);
+        if (!owner.HasValue) return null;
+        bool? visible = unit->IsVisible;
+        var uld = owner.Value.UldManager;
+        foreach (var id in path ?? Array.Empty<uint>())
+        {
+            var node = CheckboxTools.Find(uld, id);
+            var data = MemoryProbe.TryReadStruct<AtkComponentNode>((ulong)node, out _);
+            if (!data.HasValue || (int)data.Value.Type < 1000) return NativeUiVisibility.Combine(visible, null);
+            var component = MemoryProbe.TryReadStruct<AtkComponentBase>((ulong)data.Value.Component, out _);
+            if (!component.HasValue || component.Value.OwnerNode != (AtkComponentNode*)node)
+                return NativeUiVisibility.Combine(visible, null);
+            visible = NativeUiVisibility.Combine(visible, NativeUiVisibility.Read((nint)node, cache));
+            uld = component.Value.UldManager;
+        }
+        return visible;
+    }
 
     /// <summary>
     /// Pure field read of the component's kind. Replaces the native

@@ -49,7 +49,7 @@ unsafe class Program
             int Count(object query)=>(int)Elements(query).GetType().GetProperty("Count")!.GetValue(Elements(query))!;
             var query=Query();
             var walk=ui.GetMethod("WalkNode",BindingFlags.NonPublic|BindingFlags.Static)!;
-            object?[] args={Pointer.Box((void*)node,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,query,Array.Empty<uint>()};
+            object?[] args={Pointer.Box((void*)node,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,query,Array.Empty<uint>(),true};
             walk.Invoke(null,args);
             Check(Count(query)==1,"walker ignores invalid child and cyclic sibling links");
             var listType=T("AtkComponentList");var compNodeType=T("AtkComponentNode");var compType=T("AtkComponentBase");
@@ -122,6 +122,54 @@ unsafe class Program
                 Check(Refused(),"popup belonging to a different addon refused");
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
+            var visibilityApi=plugin.GetType("DalamudMCP.Tools.NativeUiVisibility")!;
+            var readVisibility=visibilityApi.GetMethod("Read",BindingFlags.NonPublic|BindingFlags.Static)!;
+            bool? Visible(nint p)=>(bool?)readVisibility.Invoke(null,new object?[]{p,null});
+            var visibleFlag=Convert.ToInt32(Enum.Parse(flagType,"Visible"));
+            var vchild=Allocate(Size(nodeType));var vparent=Allocate(Size(nodeType));
+            Marshal.WriteInt32(vchild,Offset(nodeType,"NodeFlags"),visibleFlag);
+            Marshal.WriteInt32(vparent,Offset(nodeType,"NodeFlags"),visibleFlag);
+            Marshal.WriteIntPtr(vchild,Offset(nodeType,"ParentNode"),vparent);
+            Check(Visible(vchild)==true,"visible child under visible parent is effectively visible");
+            Marshal.WriteInt32(vparent,Offset(nodeType,"NodeFlags"),0);
+            Check(Visible(vchild)==false,"self-visible child under hidden panel is effectively hidden");
+            Marshal.WriteIntPtr(vparent,Offset(nodeType,"ParentNode"),1);
+            Check(Visible(vchild)==false,"known hidden ancestor stays hidden even if its own parent is unreadable");
+            Marshal.WriteInt32(vparent,Offset(nodeType,"NodeFlags"),visibleFlag);
+            Check(Visible(vchild)==null,"unreadable visible ancestry is unknown rather than visible");
+            Marshal.WriteIntPtr(vparent,Offset(nodeType,"ParentNode"),vchild);
+            Check(Visible(vchild)==null,"cyclic visible ancestry is unknown without looping");
+            Check(Visible(0)==null&&Visible(1)==null,"null and unmapped visibility pointers are unknown");
+            var chain=Enumerable.Range(0,65).Select(_=>Allocate(Size(nodeType))).ToArray();
+            for(var i=0;i<chain.Length;i++){Marshal.WriteInt32(chain[i],Offset(nodeType,"NodeFlags"),visibleFlag);if(i+1<chain.Length)Marshal.WriteIntPtr(chain[i],Offset(nodeType,"ParentNode"),chain[i+1]);}
+            Check(Visible(chain[1])==true&&Visible(chain[0])==null,"visibility accepts 64 ancestors and bounds longer chains");
+            var combine=visibilityApi.GetMethod("Combine",BindingFlags.NonPublic|BindingFlags.Static)!;
+            bool? Combined(bool? a,bool? b)=>(bool?)combine.Invoke(null,new object?[]{a,b});
+            Check(Combined(false,null)==false&&Combined(null,false)==false&&Combined(true,null)==null&&Combined(true,true)==true,"scope visibility preserves hidden and unknown states");
+            Marshal.WriteInt32(vchild,Offset(nodeType,"NodeId"),9001);
+            Marshal.WriteIntPtr(vchild,Offset(nodeType,"ParentNode"),vparent);
+            Marshal.WriteIntPtr(vparent,Offset(nodeType,"ParentNode"),0);
+            Marshal.WriteInt32(vparent,Offset(nodeType,"NodeFlags"),0);
+            var hiddenQuery=Query("{\"visibleOnly\":true}");
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)vchild,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,hiddenQuery,Array.Empty<uint>(),true});
+            Check(Count(hiddenQuery)==0,"visibleOnly query excludes a self-visible child beneath a hidden panel");
+            var rawHiddenQuery=Query();
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)vchild,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,rawHiddenQuery,Array.Empty<uint>(),true});
+            var rawElements=Elements(rawHiddenQuery);var firstHidden=rawElements.GetType().GetProperty("Item",new[]{typeof(int)})!.GetValue(rawElements,new object[]{0})!;
+            var fieldItem=firstHidden.GetType().GetProperty("Item",new[]{typeof(string)})!;
+            Check(fieldItem.GetValue(firstHidden,new object[]{"visible"})!.ToString()=="False"&&fieldItem.GetValue(firstHidden,new object[]{"selfVisible"})!.ToString()=="True","full query distinguishes effective visibility from the local flag");
+            Marshal.WriteInt32(vparent,Offset(nodeType,"NodeFlags"),visibleFlag);
+            Marshal.WriteIntPtr(vparent,Offset(nodeType,"ParentNode"),1);
+            var unknownQuery=Query("{\"visibleOnly\":true}");
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)vchild,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,unknownQuery,Array.Empty<uint>(),true});
+            Check(Count(unknownQuery)==0&&(bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(unknownQuery)!,"unknown ancestry is excluded and marks the query incomplete");
+            Marshal.WriteIntPtr(vchild,Offset(nodeType,"ParentNode"),0);
+            var detachedQuery=Query("{\"visibleOnly\":true}");
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)vchild,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,detachedQuery,new uint[]{42},false});
+            Check(Count(detachedQuery)==0,"detached component subtree inherits hidden owner scope");
+            var unknownScopeQuery=Query("{\"visibleOnly\":true}");
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)vchild,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,true,unknownScopeQuery,new uint[]{42},null});
+            Check(Count(unknownScopeQuery)==0&&(bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(unknownScopeQuery)!,"detached component subtree preserves unknown owner visibility");
             var textApi=plugin.GetType("DalamudMCP.Tools.TextInputTools")!;
             var readInput=textApi.GetMethod("TryReadInput",BindingFlags.NonPublic|BindingFlags.Static)!;
             bool ReadInput(nint p,nint owner,out string? value){object?[] a={p,owner,(nint)0,null};var ok=(bool)readInput.Invoke(null,a)!;value=(string?)a[3];return ok;}
@@ -244,10 +292,10 @@ unsafe class Program
             Marshal.WriteIntPtr(children,innerNode);
             Check(Resolve(2,new uint[]{3,5})==node&&Resolve(2,new uint[]{3})==0,"nested component path prevents a same-id fallback into another scope");
             var scopedQuery=Query("{\"allNodes\":true,\"detail\":\"compact\"}");
-            walk.Invoke(null,new object?[]{Pointer.Box((void*)compNode,walk.GetParameters()[0].ParameterType),Pointer.Box((void*)unit,walk.GetParameters()[1].ParameterType),0,12,true,scopedQuery,Array.Empty<uint>()});
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)compNode,walk.GetParameters()[0].ParameterType),Pointer.Box((void*)unit,walk.GetParameters()[1].ParameterType),0,12,true,scopedQuery,Array.Empty<uint>(),true});
             Check(Elements(scopedQuery).ToString()!.Replace(" ","").Replace("\r","").Replace("\n","").Contains("\"componentPath\":[3,5]"),"native discovery preserves the full nested component path");
             var limitedQuery=Query();
-            walk.Invoke(null,new object?[]{Pointer.Box((void*)compNode,walk.GetParameters()[0].ParameterType),Pointer.Box((void*)unit,walk.GetParameters()[1].ParameterType),0,0,true,limitedQuery,Array.Empty<uint>()});
+            walk.Invoke(null,new object?[]{Pointer.Box((void*)compNode,walk.GetParameters()[0].ParameterType),Pointer.Box((void*)unit,walk.GetParameters()[1].ParameterType),0,0,true,limitedQuery,Array.Empty<uint>(),true});
             Check((bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(limitedQuery)!&&Count(limitedQuery)==1,"depth-limited native traversal explicitly reports incomplete coverage");
             Marshal.WriteIntPtr(inner,Offset(compType,"OwnerNode"),1);
             Check(Resolve(2,new uint[]{3,5})==0,"component path refuses mismatched native ownership");

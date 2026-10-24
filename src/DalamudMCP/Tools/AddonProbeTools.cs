@@ -28,7 +28,7 @@ internal sealed class AddonProbeTools : IDisposable
             ("componentPath", "array of integer", "Exact component path from list_addon_elements, outermost first (0-40 ids). Empty means top-level. Do not combine with componentId.", false),
             ("nodeIds", "array of integer", "Top-level UldManager node ids (1-32 unique ids). Component children are deliberately excluded to avoid ambiguous ids.", true));
         registry.Add("get_addon_node_snapshot", "Read precise addon node state",
-            "Reads local and screen geometry, native transform matrices, origins, parent ids, visibility, node addresses, animation timelines and the addon's scalar values together on the framework thread. No input or memory writes.",
+            "Reads local and screen geometry, native transform matrices, origins, parent ids, effective visibility, node addresses, animation timelines and the addon's scalar values together on the framework thread. visible includes addon/parent/component scopes; selfVisible is the node's own flag. Unreadable or cyclic ancestry reports visible=null. No input or memory writes.",
             schema, Read);
         var traceSchema = (JObject)schema.DeepClone();
         ((JObject)traceSchema["properties"]!).Add("frames", new JObject { ["type"] = "integer", ["description"] = "Number of frames to observe, 1-600 (default 180)." });
@@ -115,11 +115,15 @@ internal sealed class AddonProbeTools : IDisposable
         var unit = Resolve(name);
         if (unit == null) return new JObject { ["available"] = false, ["addon"] = name };
         var nodes = new JArray();
+        var visibilityCache = new Dictionary<nint, bool?>();
+        var scopeVisibility = UiTools.ScopeVisibility(unit,
+            componentPath ?? (componentId.HasValue ? new[] { componentId.Value } : null), visibilityCache);
         foreach (var id in ids)
         {
             var node = FindNode(unit, id, componentId, componentPath);
             if (node == null) { nodes.Add(new JObject { ["nodeId"] = id, ["available"] = false }); continue; }
             var timeline = node->Timeline;
+            var parent = MemoryProbe.TryReadStruct<AtkResNode>((ulong)node->ParentNode, out _);
             var events = new JArray();
             for (var e = node->AtkEventManager.Event; e != null && events.Count < 32; e = e->NextEvent)
                 events.Add(new JObject { ["type"] = e->State.EventType.ToString(), ["param"] = e->Param, ["listener"] = $"0x{(nuint)e->Listener:X}" });
@@ -130,7 +134,7 @@ internal sealed class AddonProbeTools : IDisposable
                 ["screenX"] = node->ScreenX, ["screenY"] = node->ScreenY,
                 ["originX"] = node->OriginX, ["originY"] = node->OriginY,
                 ["rotation"] = node->Rotation,
-                ["parentNodeId"] = node->ParentNode == null ? null : (long?)node->ParentNode->NodeId,
+                ["parentNodeId"] = parent.HasValue ? (long?)parent.Value.NodeId : null,
                 ["transform"] = new JObject
                 {
                     ["m11"] = node->Transform.M11, ["m12"] = node->Transform.M12,
@@ -138,7 +142,8 @@ internal sealed class AddonProbeTools : IDisposable
                 },
                 ["width"] = node->Width, ["height"] = node->Height,
                 ["scaleX"] = node->ScaleX, ["scaleY"] = node->ScaleY,
-                ["visible"] = (node->NodeFlags & NodeFlags.Visible) != 0,
+                ["visible"] = NativeUiVisibility.Combine(scopeVisibility, NativeUiVisibility.Read((nint)node, visibilityCache)),
+                ["selfVisible"] = (node->NodeFlags & NodeFlags.Visible) != 0,
                 ["enabled"] = (node->NodeFlags & NodeFlags.Enabled) != 0,
                 ["events"] = events,
                 ["timeline"] = timeline == null ? null : new JObject
@@ -288,8 +293,8 @@ internal sealed class AddonProbeTools : IDisposable
                     var guardIndex = args.Value<int?>("guardValueIndex");
                     var guard = guardIndex.HasValue ? ((JArray)snapshot["values"]!).OfType<JObject>().FirstOrDefault(v => v.Value<int>("index") == guardIndex.Value) : null;
                     var guardMatches = !guardIndex.HasValue || (guard != null && guard.Value<string>("type") is "Int" or "UInt" && ((JArray)args["guardValues"]!).Any(v => v.Value<long>() == guard.Value<long>("value")));
-                    if (snapshot.Value<bool>("visible") && observed.Value<bool>("available") && observed.Value<bool>("visible") &&
-                        target.Value<bool>("available") && target.Value<bool>("visible") && target.Value<bool>("enabled") && matches && guardMatches)
+                    if (snapshot.Value<bool>("visible") && observed.Value<bool>("available") && observed.Value<bool?>("visible") == true &&
+                        target.Value<bool>("available") && target.Value<bool?>("visible") == true && target.Value<bool>("enabled") && matches && guardMatches)
                     {
                         clickResult = UiTools.ClickAddonElement(clickArgs);
                         reason = "triggered";
@@ -320,7 +325,7 @@ internal sealed class AddonProbeTools : IDisposable
     private static ScreenNode Screen(JObject node, bool vertical = false) => new(
         node.Value<float>(vertical ? "screenY" : "screenX"), node.Value<float>(vertical ? "height" : "width"), node["transform"]?.Value<float>(vertical ? "m22" : "m11") ?? 0,
         node["transform"]?.Value<float>("m12") ?? 0, node["transform"]?.Value<float>("m21") ?? 0,
-        node.Value<bool>("available") && node.Value<bool>("visible"));
+        node.Value<bool>("available") && node.Value<bool?>("visible") == true);
 
     public void Dispose() => lifetime.Cancel();
 }

@@ -8,7 +8,7 @@
 
 - `label`：去除首尾空白后、不区分大小写的字面精确匹配，最多 256 字符；`containsMatch=true` 改为子串匹配，必须提供非空标签。不会执行正则或自动选择某个候选。
 - `componentType`：按 SDK 组件类型筛选，例如 `Button`、`CheckBox`；合法名称在工具 schema 的枚举中。
-- `visibleOnly`、`enabledOnly`、`clickableOnly`：可组合，默认均为 false；状态沿用已有节点读取逻辑，不代表操作已获授权或事件一定有效。
+- `visibleOnly`、`enabledOnly`、`clickableOnly`：可组合，默认均为 false。`visibleOnly` 检查窗口、父链和所属组件的有效可见性；`enabledOnly` 仍表示节点自身的启用标记，不代表操作已获授权或事件一定有效。
 - `detail=compact`：仅返回 `nodeId`、`componentPath`、组件类型、标签、可见/启用/可点击状态；`full` 保留原有类型、深度、坐标和尺寸。
 - `maxNodes`：限制筛选后的匹配数，范围 1–500，默认 100。无关节点不消耗结果预算；发现额外一个匹配后标记截断。`allNodes` 默认 false，仍只考虑有标签或被识别为可点击的节点。
 
@@ -23,6 +23,16 @@
 `sample_addon_nodes` 同样支持此路径；`click_addon_when_node_matches` 的 `componentPath` 同时限定观察、目标与点击节点，触发时仍使用同一路径定位。
 
 `returned` 表示本次返回的节点数，`scannedNodes` 表示访问过的唯一原生节点地址数。遍历最多访问 4096 个节点，每个 ULD 数组最多 512 项，组件深度由 `maxDepth` 限制。`scanIncomplete=true` 表示深度、读取或遍历边界使扫描不完整；此时或结果数超限时，`truncated=true`。截断结果不能证明目标不存在或唯一。
+
+## 有效可见性
+
+从 1.0.0.14 起，节点的 `visible` 同时考虑窗口、原生父链和组件所属范围；`detail=full` 及节点快照另保留 `selfVisible`，表示自身原始标记。父面板隐藏时可能出现 `selfVisible=true, visible=false`。不可读、循环或超过 64 层的父链返回 `visible=null`，查询标记 `scanIncomplete=true`，并从 `visibleOnly` 结果中排除。祖先可见性缓存只在同一次查询或同一帧快照内使用。各组件范围的隐藏/未知状态会传播到其独立 ULD 子树。
+
+这些有效可见性状态也用于原生节点点击、列表控件发现和条件点击的保护判断。可见不保证未被其他窗口遮挡，也不代表点击必然有业务效果；本更新不检测裁剪、透明度或遮挡。
+
+2026-10-24 现场复现及验证：`MountNoteBook` 在常用页中，搜索面板 18 隐藏、输入框 21 自身标记可见。旧版 `visibleOnly=true` 错误返回输入框；修复后返回 0 条，完整查询和快照均报告 `selfVisible=true, visible=false`，隐藏搜索按钮的点击被拒绝。切到实际搜索页后，查询恢复返回 1 条有效输入框，中文坐骑搜索继续产生正确结果。未改变搜索功能或消耗游戏资源。
+
+本次 Debug/Release 构建均为零警告、零错误。原生 UI 检查 91/91（两个构建）、筛选检查 21/21、几何检查 26/26、Release 插件加载检查 143/143、协议检查 50/50 通过。现场 full/compact 查询均返回 227 条，精确名称查询返回相同的两个节点范围；未截断且扫描完整。`allNodes=true` 的坐骑窗口超过单次 500 条上限，不能用该截断结果证明完整性。
 
 ## 验证
 

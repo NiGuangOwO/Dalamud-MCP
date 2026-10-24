@@ -29,6 +29,7 @@ Use the connected schemas for exact arguments, limits and defaults. This is a ro
 | Must the game's window be minimized/restored? | `set_game_window_state` is a separate mutating-gated action, usable without login. Use only within the task's authorization; verify `observed`. Screenshots never restore/focus the window automatically. |
 
 `imgui_*` targets Dear ImGui input/windows; it is not the native Atk addon tree. Use native addon tools for node identity and event contracts. Respect any user prohibition on visual input or computer use; having an input tool does not override it.
+Native node `visible` includes addon, ancestor and component-scope visibility. Full queries and snapshots expose `selfVisible` separately. `visible=null` means ancestry is unreadable/cyclic/over budget; filtered queries exclude it and set `scanIncomplete`. Visibility is not an occlusion or hit-test guarantee.
 
 Tool responses describing a command/event dispatch are intermediate evidence. For example, follow a duty-list selection with a fresh list/state read; do not treat `fired=true` as proof of a selected duty or queue registration. Missing windows, an unavailable action and an idle cancellation are valid contextual outcomes, not successful gameplay tests.
 `click_addon_when_node_matches` also supports `matchAxis="rotation"` with inclusive `minRotation`/`maxRotation` in local radians (-pi to pi, no wraparound). This is separate from screen-position matching; omit targetNodeId and width bounds. Use same-frame phase guards and verify resulting game state.
