@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 123;
+    private const int ExpectedTools = 124;
 
     private static int checks;
     private static int failures;
@@ -409,6 +409,8 @@ internal static class Program
         Check("native context-menu opening is classified as mutating", Equals(Prop(contextTool, "Mutating"), true));
         var contextQuery = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "get_inventory_context"));
         Check("inventory context query is read-only", Equals(Prop(contextQuery, "Mutating"), false));
+        var mapQuery = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "get_map_state"));
+        Check("map snapshot query is read-only", Equals(Prop(mapQuery, "Mutating"), false));
         var numericTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_numeric_input"));
         Check("native numeric editing is classified as mutating", Equals(Prop(numericTool, "Mutating"), true));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));

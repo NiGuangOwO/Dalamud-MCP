@@ -139,6 +139,39 @@ unsafe class Program
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
             var numberApi=plugin.GetType("DalamudMCP.Tools.NumericInputTools")!;
+            var mapApi=plugin.GetType("DalamudMCP.Tools.MapTools")!;
+            var readMap=mapApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            string Map(nint p,int start=0,int limit=40)=>readMap.Invoke(null,new object[]{p,start,limit})!.ToString()!;
+            System.Text.Json.JsonElement MapJson(nint p,int start=0,int limit=40)=>System.Text.Json.JsonDocument.Parse(Map(p,start,limit)).RootElement.Clone();
+            Check(!MapJson(1).GetProperty("available").GetBoolean(),"invalid map-agent pointer returns unavailable");
+            var mapType=fcs.GetType("FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentMap")!;
+            var mapMemory=Allocate(Size(mapType));
+            Marshal.WriteInt32(mapMemory,Offset(mapType,"CurrentMapId"),12);Marshal.WriteInt32(mapMemory,Offset(mapType,"SelectedMapId"),11);
+            Marshal.WriteInt32(mapMemory,Offset(mapType,"CurrentTerritoryId"),129);Marshal.WriteInt32(mapMemory,Offset(mapType,"SelectedTerritoryId"),128);
+            Marshal.WriteByte(mapMemory,Offset(mapType,"MapMarkerCount"),3);
+            var markerType=fcs.GetType("FFXIVClientStructs.FFXIV.Client.UI.Agent.MapMarkerInfo")!;
+            var markerBase=fcs.GetType("FFXIVClientStructs.FFXIV.Client.UI.Agent.MapMarkerBase")!;
+            var markersStart=Offset(mapType,"_mapMarkers");
+            for(var i=0;i<3;i++){var m=mapMemory+markersStart+i*Size(markerType);Marshal.WriteInt32(m,Offset(markerBase,"IconId"),60000+i);Marshal.WriteInt16(m,Offset(markerBase,"X"),(short)(-100+i));Marshal.WriteInt16(m,Offset(markerBase,"Y"),(short)(200+i));}
+            var mapPage=MapJson(mapMemory,0,2);
+            Check(mapPage.GetProperty("currentMapId").GetInt32()==12&&mapPage.GetProperty("selectedMapId").GetInt32()==11&&mapPage.GetProperty("selectedTerritoryId").GetInt32()==128,"map snapshot distinguishes current territory/map from selected territory/map");
+            Check(mapPage.GetProperty("count").GetInt32()==2&&mapPage.GetProperty("nextMarkerOffset").GetInt32()==2&&mapPage.GetProperty("truncated").GetBoolean(),"map marker pagination preserves remaining native indices");
+            Check(mapPage.GetProperty("markers")[0].GetProperty("nativeX").GetInt32()==-100&&mapPage.GetProperty("markers")[1].GetProperty("iconId").GetInt32()==60001,"SDK map marker layout preserves signed coordinates and icon identity");
+            mapPage=MapJson(mapMemory,2,2);
+            Check(mapPage.GetProperty("count").GetInt32()==1&&mapPage.GetProperty("markers")[0].GetProperty("arrayIndex").GetInt32()==2&&mapPage.GetProperty("nextMarkerOffset").ValueKind==System.Text.Json.JsonValueKind.Null,"last map page has no duplicate or fabricated marker");
+            Check(MapJson(mapMemory,132).GetProperty("count").GetInt32()==0,"map offset beyond active count returns an empty page");
+            Marshal.WriteByte(mapMemory,Offset(mapType,"MapMarkerCount"),133);mapPage=MapJson(mapMemory);
+            Check(mapPage.GetProperty("scanIncomplete").GetBoolean()&&mapPage.GetProperty("count").GetInt32()==0,"oversized map count cannot read past SDK fixed marker array");
+            Marshal.WriteByte(mapMemory,Offset(mapType,"MapMarkerCount"),132);
+            Check(MapJson(mapMemory,131,132).GetProperty("count").GetInt32()==1,"last in-capacity static map marker remains readable");
+            var readMapLabel=mapApi.GetMethod("LabelAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            Check(readMapLabel.Invoke(null,new object[]{(nint)1})==null,"unreadable map marker subtext is optional and guarded");
+            var mapLabel=Allocate(512);new Span<byte>((void*)mapLabel,512).Fill(65);
+            Check(readMapLabel.Invoke(null,new object[]{mapLabel})==null,"nonterminated map subtext is not reported as a complete label");
+            Marshal.WriteByte(mapLabel,4,0);Check((string?)readMapLabel.Invoke(null,new object[]{mapLabel})=="AAAA","bounded NUL-terminated map subtext is preserved");
+            foreach(var invalidPage in new[]{(-1,40),(133,40),(0,0),(0,133)}){var refused=false;try{Map(mapMemory,invalidPage.Item1,invalidPage.Item2);}catch(TargetInvocationException e){refused=e.InnerException?.GetType().Name=="ToolException";}Check(refused,"invalid map marker page refused before access: "+invalidPage);}
+            var mapInteger=mapApi.GetMethod("Integer",BindingFlags.NonPublic|BindingFlags.Static)!;
+            foreach(var invalidNumber in new[]{"{\"maxMarkers\":1.5}","{\"maxMarkers\":\"40\"}","{\"maxMarkers\":null}","{\"maxMarkers\":2147483648}"}){var refused=false;try{mapInteger.Invoke(null,new object?[]{parse.Invoke(null,new[]{invalidNumber}),"maxMarkers",40,1,132});}catch(TargetInvocationException e){refused=e.InnerException?.GetType().Name=="ToolException";}Check(refused,"strict map page argument refused: "+invalidNumber);}
             var readNumber=numberApi.GetMethod("TryRead",BindingFlags.NonPublic|BindingFlags.Static)!;
             var numberType=T("AtkComponentNumericInput");var numberData=numberType.GetField("Data")!.FieldType;
             var numberNode=Allocate(Size(compNodeType));var numberControl=Allocate(Size(numberType));var numberInfo=Allocate(Size(componentInfo));

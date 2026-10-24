@@ -11,7 +11,7 @@ plugin development, runtime inspection and in-game validation.
 The plugin runs within the game process and exposes character, object, party, inventory, game-data and UI state
 through Dalamud services and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 It also provides validated raw-memory reads, event collection, screenshots and inter-plugin communication.
-The current catalog contains **123 tools: 74 read-only and 49 mutating**. Mutating tools require explicit enablement.
+The current catalog contains **124 tools: 75 read-only and 49 mutating**. Mutating tools require explicit enablement.
 
 The default endpoint is `http://127.0.0.1:18777/mcp`. HTTP-capable MCP clients connect directly;
 stdio-only clients use the included bridge.
@@ -238,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-The catalog contains 123 tools: 74 read-only and 49 mutating. The tables summarize the principal tools and parameters.
+The catalog contains 124 tools: 75 read-only and 49 mutating. The tables summarize the principal tools and parameters.
 The server's `tools/list` schemas define the complete catalog and argument constraints.
 Mutating tools are available only when `AllowMutatingTools` is enabled.
 
@@ -249,6 +249,7 @@ Use `set_addon_checkbox` for native checkbox state. See [checkbox behavior and v
 Use `set_addon_text_input` for native text fields; `imgui_text` targets Dear ImGui. See [native text input and live validation](docs/native-text-input.md).
 Use `open_addon_context_menu` for an observed carried-bag DragDrop control and `get_inventory_context` to verify the real target item. See [inventory context menus](docs/inventory-context-menu.md).
 Use `set_addon_numeric_input` for bounded native number edits with actual Min/Max and value readback. It does not confirm a quantity dialog. See [numeric inputs](docs/native-numeric-input.md).
+Use `get_map_state` to distinguish current/selected maps and page static markers; raw marker coordinates must not be used for movement. See [map state](docs/map-state.md).
 
 ### Client and session
 
