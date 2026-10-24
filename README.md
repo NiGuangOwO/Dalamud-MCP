@@ -11,7 +11,7 @@ plugin development, runtime inspection and in-game validation.
 The plugin runs within the game process and exposes character, object, party, inventory, game-data and UI state
 through Dalamud services and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 It also provides validated raw-memory reads, event collection, screenshots and inter-plugin communication.
-The current catalog contains **127 tools: 76 read-only and 51 mutating**. Mutating tools require explicit enablement.
+The current catalog contains **129 tools: 77 read-only and 52 mutating**. Mutating tools require explicit enablement.
 
 The default endpoint is `http://127.0.0.1:18777/mcp`. HTTP-capable MCP clients connect directly;
 stdio-only clients use the included bridge.
@@ -238,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-The catalog contains 127 tools: 76 read-only and 51 mutating. The tables summarize the principal tools and parameters.
+The catalog contains 129 tools: 77 read-only and 52 mutating. The tables summarize the principal tools and parameters.
 The server's `tools/list` schemas define the complete catalog and argument constraints.
 Mutating tools are available only when `AllowMutatingTools` is enabled.
 
@@ -251,6 +251,7 @@ Use `open_addon_context_menu` for an observed carried-bag DragDrop control and `
 Use `set_addon_numeric_input` for bounded native number edits with actual Min/Max and value readback. It does not confirm a quantity dialog. See [numeric inputs](docs/native-numeric-input.md).
 Use `get_map_state` to distinguish current/selected maps and page static markers; raw marker coordinates must not be used for movement. See [map state](docs/map-state.md).
 Use `get_addon_dropdown`, `set_addon_dropdown_open`, then `select_addon_dropdown_item` for observed native dropdowns; wait for settled open state and verify the actual addon result. See [native dropdowns](docs/native-dropdown.md).
+Use `get_addon_list_row` and `activate_addon_list_row` for guarded List/TreeList renderer activation with actual indices and text. Wait for the business outcome before repeating. See [native list rows](docs/native-list-rows.md).
 
 ### Client and session
 

@@ -22,6 +22,15 @@ unsafe class Program
     static bool dropdownOpenTarget;
     static nint dropdownOpenEventNode;
     static int dropdownButtonFlagsOffset;
+    static nint listRowList, listRowRenderer;
+    static int listRowSelectedOffset, listRowIndexOffset, listRowSelectCalls, listRowEvents, listRowSelectedArgument, listRowEventArgument;
+    static bool listRowDisabled, listRowRecycled, listRowIgnore;
+    static bool listRowChangeText;
+    static nint listRowText;
+    [UnmanagedCallersOnly] static nint ListRowRenderer(nint list,int index) => index==6?listRowRenderer:0;
+    [UnmanagedCallersOnly] static byte ListRowDisabled(nint list,int index) => listRowDisabled?(byte)1:(byte)0;
+    [UnmanagedCallersOnly] static void ListRowSelect(nint list,int index,byte dispatch) { listRowSelectCalls++;listRowSelectedArgument=index;if(!listRowIgnore)Marshal.WriteInt32(listRowList,listRowSelectedOffset,index);if(listRowRecycled)Marshal.WriteInt32(listRowRenderer,listRowIndexOffset,7);if(listRowChangeText)Marshal.WriteByte(listRowText,88); }
+    [UnmanagedCallersOnly] static void ListRowEvent(nint list,int index,byte type) { listRowEvents++;listRowEventArgument=index; }
     [UnmanagedCallersOnly] static void DropdownCheck(nint control, byte value) { var flags=Marshal.ReadInt32(control,dropdownButtonFlagsOffset);Marshal.WriteInt32(control,dropdownButtonFlagsOffset,value!=0?flags|(1<<18):flags&~(1<<18)); }
     [UnmanagedCallersOnly] static byte DropdownDisabled(nint list, int index) => dropdownDisabled ? (byte)1 : (byte)0;
     [UnmanagedCallersOnly] static void DropdownSelect(nint control, int index) { dropdownCalls++; dropdownLastIndex=index; if(!dropdownIgnore)Marshal.WriteInt32(dropdownList,dropdownSelectedOffset,index); }
@@ -231,6 +240,47 @@ unsafe class Program
                 Check(dropdownCalls==2,"all rejected dropdown paths invoke no native selector");
             }finally{dropdownAddressValue.SetValue(dropdownAddress,originalDropdownAddress);dropDispatchValue.SetValue(dropDispatchAddress,originalDropDispatch);dropdownButtonValue.SetValue(dropdownButtonAddress,originalDropdownButton);}
             var mapApi=plugin.GetType("DalamudMCP.Tools.MapTools")!;
+            var rowApi=plugin.GetType("DalamudMCP.Tools.ListRowTools")!;var rowRead=rowApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;var rowActivate=rowApi.GetMethod("ActivateAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var treeControlType=T("AtkComponentTreeList");var rendererControlType=T("AtkComponentListItemRenderer");
+            var rowListNode=Allocate(Size(compNodeType));var rowListControl=Allocate(Size(treeControlType));var rowListInfo=Allocate(Size(componentInfo));
+            var rowNode=Allocate(Size(compNodeType));var rowControl=Allocate(Size(rendererControlType));var rowInfo=Allocate(Size(componentInfo));
+            Component(rowListNode,rowListControl,rowListInfo,"TreeList");Component(rowNode,rowControl,rowInfo,"ListItemRenderer");Marshal.WriteInt32(rowListNode,Offset(nodeType,"NodeId"),9);Marshal.WriteInt32(rowNode,Offset(nodeType,"NodeId"),61004);Marshal.WriteIntPtr(rowNode,Offset(nodeType,"ParentNode"),rowListNode);
+            var rowListNodes=Allocate(8);Marshal.WriteIntPtr(rowListNodes,rowNode);Marshal.WriteIntPtr(rowListControl,uldOffset+Offset(uld,"NodeList"),rowListNodes);Marshal.WriteInt16(rowListControl,uldOffset+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteInt32(rowListControl,Offset(listType,"ListLength"),8);Marshal.WriteInt32(rowControl,Offset(rendererControlType,"ListItemIndex"),6);
+            var rowTextNode=Allocate(Size(textType));var rowTextBytes=Allocate(512);Marshal.Copy(System.Text.Encoding.UTF8.GetBytes("observed destination"),0,rowTextBytes,20);Marshal.WriteInt16(rowTextNode,Offset(nodeType,"Type"),Convert.ToInt16(Enum.Parse(typeField.FieldType,"Text")));Marshal.WriteInt32(rowTextNode,Offset(nodeType,"NodeId"),6);Marshal.WriteInt32(rowTextNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible")));Marshal.WriteIntPtr(rowTextNode,Offset(nodeType,"ParentNode"),rowNode);Marshal.WriteIntPtr(rowTextNode,textOffset,rowTextBytes);
+            var rowTexts=Allocate(8);Marshal.WriteIntPtr(rowTexts,rowTextNode);Marshal.WriteIntPtr(rowControl,uldOffset+Offset(uld,"NodeList"),rowTexts);Marshal.WriteInt16(rowControl,uldOffset+Offset(uld,"NodeListCount"),1);
+            var rowUnit=Allocate(Size(unitType));var rowUnitTable=Allocate(Size(dropReceiverTableType));Marshal.WriteIntPtr(rowUnitTable,Offset(dropReceiverTableType,"ReceiveEvent"),(nint)(delegate* unmanaged<nint,byte,int,nint,nint,void>)&ContextEvent);Marshal.WriteIntPtr(rowUnit,0,rowUnitTable);
+            var rowEvent=Allocate(Size(dropEventType));Marshal.WriteByte(rowEvent,Offset(dropEventType,"State")+Offset(dropEventType.GetField("State")!.FieldType,"EventType"),dropEventKind);Marshal.WriteIntPtr(rowEvent,Offset(dropEventType,"Listener"),rowUnit);Marshal.WriteIntPtr(rowListNode,dropEventOffset,rowEvent);
+            var rowTable=Allocate(Size(dropTableType));Marshal.WriteIntPtr(rowListControl,0,rowTable);Marshal.WriteIntPtr(rowTable,Offset(dropTableType,"GetItemRenderer"),(nint)(delegate* unmanaged<nint,int,nint>)&ListRowRenderer);Marshal.WriteIntPtr(rowTable,Offset(dropTableType,"GetItemDisabledState"),(nint)(delegate* unmanaged<nint,int,byte>)&ListRowDisabled);Marshal.WriteIntPtr(rowTable,Offset(dropTableType,"SelectItem"),(nint)(delegate* unmanaged<nint,int,byte,void>)&ListRowSelect);
+            listRowList=rowListControl;listRowRenderer=rowControl;listRowSelectedOffset=Offset(listType,"SelectedItemIndex");listRowIndexOffset=Offset(rendererControlType,"ListItemIndex");
+            listRowText=rowTextBytes;
+            System.Text.Json.JsonElement ReadRow()=>System.Text.Json.JsonDocument.Parse(rowRead.Invoke(null,new object[]{rowUnit,rowListNode,rowNode})!.ToString()!).RootElement.Clone();
+            System.Text.Json.JsonElement ActivateRow(int index=6,string text="observed destination",bool dry=false)=>System.Text.Json.JsonDocument.Parse(rowActivate.Invoke(null,new object[]{rowUnit,rowListNode,rowNode,index,text,dry})!.ToString()!).RootElement.Clone();
+            try{
+                dropDispatchValue.SetValue(dropDispatchAddress,(nint)(delegate* unmanaged<nint,int,byte,void>)&ListRowEvent);
+                var rr=ReadRow();Check(rr.GetProperty("rowIndex").GetInt32()==6&&rr.GetProperty("texts")[0].GetProperty("text").GetString()=="observed destination","TreeList row identity comes from renderer index6, never node61004 or text node6");
+                Check(!ActivateRow(dry:true).GetProperty("inputDispatched").GetBoolean()&&listRowSelectCalls==0&&listRowEvents==0,"row activation dry run validates SDK renderer and sends no input");
+                rr=ActivateRow();Check(rr.GetProperty("inputDispatched").GetBoolean()&&listRowSelectCalls==1&&listRowEvents==1&&listRowSelectedArgument==6&&listRowEventArgument==6,"row activation selects and emits SDK event for authoritative index6");
+                ActivateRow();Check(listRowSelectCalls==1&&listRowEvents==2,"already selected row activates once without redundant selection");
+                Check(DropRefuses(()=>ActivateRow(61004)),"renderer node id cannot masquerade as an actual row index");
+                Check(DropRefuses(()=>ActivateRow(text:"stale label")),"stale list row text is refused");
+                listRowDisabled=true;Check(DropRefuses(()=>ActivateRow()),"SDK-disabled list row refuses activation");listRowDisabled=false;
+                Marshal.WriteByte(rowListControl,Offset(treeControlType,"LayoutRefreshPending"),1);Check(DropRefuses(()=>ActivateRow()),"TreeList pending layout refuses activation");Marshal.WriteByte(rowListControl,Offset(treeControlType,"LayoutRefreshPending"),0);
+                Marshal.WriteInt32(rowNode,Offset(nodeType,"NodeFlags"),0);Check(DropRefuses(()=>ActivateRow()),"hidden disabled renderer refuses activation");Marshal.WriteInt32(rowNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+                Marshal.WriteIntPtr(rowNode,Offset(nodeType,"ParentNode"),1);Check(DropRefuses(()=>ReadRow()),"foreign list parent is refused");Marshal.WriteIntPtr(rowNode,Offset(nodeType,"ParentNode"),rowListNode);
+                Marshal.WriteIntPtr(rowControl,Offset(compType,"OwnerNode"),1);Check(DropRefuses(()=>ReadRow()),"foreign list renderer owner is refused");Marshal.WriteIntPtr(rowControl,Offset(compType,"OwnerNode"),rowNode);
+                Marshal.WriteInt32(rowControl,listRowIndexOffset,8);Check(DropRefuses(()=>ReadRow()),"out-of-range renderer index refused");Marshal.WriteInt32(rowControl,listRowIndexOffset,6);
+                Marshal.WriteInt32(rowListControl,listRowSelectedOffset,8);Check(DropRefuses(()=>ReadRow()),"invalid current list selection refused before SDK access");Marshal.WriteInt32(rowListControl,listRowSelectedOffset,6);
+                Marshal.WriteIntPtr(rowTextNode,textOffset,1);rr=ReadRow();Check(rr.GetProperty("scanIncomplete").GetBoolean()&&DropRefuses(()=>ActivateRow()),"unreadable row text remains unknown and blocks activation");Marshal.WriteIntPtr(rowTextNode,textOffset,rowTextBytes);
+                Marshal.WriteIntPtr(rowEvent,Offset(dropEventType,"Listener"),1);Check(DropRefuses(()=>ActivateRow()),"foreign list click listener refused");Marshal.WriteIntPtr(rowEvent,Offset(dropEventType,"Listener"),rowUnit);
+                Marshal.WriteIntPtr(rowEvent,Offset(dropEventType,"NextEvent"),rowEvent);Check(DropRefuses(()=>ActivateRow()),"cyclic list click event chain refused");Marshal.WriteIntPtr(rowEvent,Offset(dropEventType,"NextEvent"),0);
+                Marshal.WriteIntPtr(rowTable,Offset(dropTableType,"SelectItem"),1);Check(DropRefuses(()=>ActivateRow()),"non-executable list selector refuses activation");Marshal.WriteIntPtr(rowTable,Offset(dropTableType,"SelectItem"),(nint)(delegate* unmanaged<nint,int,byte,void>)&ListRowSelect);
+                Check(listRowSelectCalls==1&&listRowEvents==2,"rejected row paths send no selection or event");
+                Marshal.WriteInt32(rowListControl,listRowSelectedOffset,0);listRowRecycled=true;rr=ActivateRow();Check(rr.GetProperty("selectionDispatched").GetBoolean()&&!rr.GetProperty("inputDispatched").GetBoolean()&&listRowEvents==2,"recycled row after selection never emits the old item's activation");listRowRecycled=false;Marshal.WriteInt32(rowControl,listRowIndexOffset,6);
+                Marshal.WriteInt32(rowListControl,listRowSelectedOffset,0);listRowIgnore=true;rr=ActivateRow();Check(!rr.GetProperty("inputDispatched").GetBoolean()&&listRowEvents==2,"selection without transition never activates an unselected item");listRowIgnore=false;
+                Marshal.WriteInt32(rowListControl,listRowSelectedOffset,0);listRowChangeText=true;rr=ActivateRow();Check(!rr.GetProperty("inputDispatched").GetBoolean()&&listRowEvents==2,"same-index renderer with replaced text after selection never activates stale content");listRowChangeText=false;Marshal.WriteByte(rowTextBytes,111);
+                Marshal.WriteByte(rowListInfo,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"List")));Check(ReadRow().GetProperty("rowIndex").GetInt32()==6,"same guarded renderer query supports ordinary native List");
+            }finally{dropDispatchValue.SetValue(dropDispatchAddress,originalDropDispatch);}
             var readMap=mapApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;
             string Map(nint p,int start=0,int limit=40)=>readMap.Invoke(null,new object[]{p,start,limit})!.ToString()!;
             System.Text.Json.JsonElement MapJson(nint p,int start=0,int limit=40)=>System.Text.Json.JsonDocument.Parse(Map(p,start,limit)).RootElement.Clone();

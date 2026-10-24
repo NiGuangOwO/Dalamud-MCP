@@ -191,6 +191,7 @@ internal static class UiTools
         NumericInputTools.Register(registry);
         MapTools.Register(registry);
         DropdownTools.Register(registry);
+        ListRowTools.Register(registry);
         registry.Add(
             "click_addon_element",
             "Click an addon (UI window) element",

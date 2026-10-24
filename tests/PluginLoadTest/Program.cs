@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 127;
+    private const int ExpectedTools = 129;
 
     private static int checks;
     private static int failures;
@@ -417,6 +417,10 @@ internal static class Program
         Check("dropdown selection is classified as mutating", Equals(Prop(dropSelect, "Mutating"), true));
         var dropOpen = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_dropdown_open"));
         Check("dropdown open state is classified as mutating", Equals(Prop(dropOpen, "Mutating"), true));
+        var rowQuery = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "get_addon_list_row"));
+        Check("list row query is read-only", Equals(Prop(rowQuery, "Mutating"), false));
+        var rowActivate = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "activate_addon_list_row"));
+        Check("list row activation is classified as mutating", Equals(Prop(rowActivate, "Mutating"), true));
         var numericTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_numeric_input"));
         Check("native numeric editing is classified as mutating", Equals(Prop(numericTool, "Mutating"), true));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));

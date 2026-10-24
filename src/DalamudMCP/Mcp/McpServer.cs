@@ -650,6 +650,7 @@ public sealed class McpServer : IDisposable
                         "Use set_addon_numeric_input for native NumericInput fields; read live limits and actual value. Numeric edits do not confirm the surrounding dialog. " +
                         "Use get_map_state to distinguish current and selected maps and page static markers; nativeX/nativeY are raw marker coordinates, never movement coordinates. Hidden-map selection is cached. " +
                         "For native dropdowns use get_addon_dropdown, set_addon_dropdown_open, then re-query settled visible state before select_addon_dropdown_item with exact expectedLabel. Verify actual addon behavior separately. " +
+                        "For observed List/TreeList renderer rows use get_addon_list_row then activate_addon_list_row with exact index/text guards. Renderer node IDs are not row indices. Wait for the business outcome before repeating non-idempotent activation. " +
                         "Native node visible includes ancestors/component scopes; selfVisible is only the local flag and null visibility is unknown. " +
                         "Inventory open/close uses its dedicated UI module; inspect open/observed and loaded windows, not the persistent agent's activation. " +
                         "Use open_addon_context_menu for allowed carried-bag DragDrop controls; inspect ContextMenu and get_inventory_context " +
