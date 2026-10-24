@@ -11,17 +11,17 @@ internal sealed record HoldingContainer(string Scope, string Container, string O
     string? OwnerName, bool Available, string? Reason, DateTimeOffset ObservedAt, HoldingItem[] Items);
 internal sealed record HoldingRetainer(string Id, string Name);
 
-/// <summary>Old retainer buffers must not be relabelled when selection changes before packets arrive.</summary>
+/// <summary>Bind a ready inventory UI lifetime to its selected retainer; loaded buffers alone have no owner.</summary>
 internal sealed class RetainerOwnership
 {
     private ulong selected;
     private ulong loadedOwner;
     private bool waiting;
     public void Reset() { selected = 0; loadedOwner = 0; waiting = false; }
-    public void Observe(ulong id, bool loaded)
+    public void Observe(ulong id, bool inventoryReady)
     {
         selected = id;
-        if (!loaded)
+        if (!inventoryReady)
         {
             loadedOwner = 0;
             waiting = false;

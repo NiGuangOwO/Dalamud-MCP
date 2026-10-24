@@ -60,13 +60,16 @@ foreach (var bad in new[] { "{}", "{itemId:10,name:'x'}", "{itemId:0}", "{itemId
     Check(refused, "reject invalid query " + bad);
 }
 var gate = new RetainerOwnership();
-gate.Observe(100, true); Check(gate.CanRead(100), "initial loaded retainer is readable");
-gate.Observe(200, true); Check(!gate.CanRead(200) && !gate.CanRead(100), "switch cannot relabel still-loaded old buffers");
+gate.Observe(0, false); gate.Observe(100, false);
+Check(!gate.CanRead(100), "preallocated loaded containers do not authorize reading before inventory UI opens");
+gate.Observe(100, true); Check(gate.CanRead(100), "opening inventory UI establishes selected retainer ownership");
+gate.Observe(200, true); Check(!gate.CanRead(200) && !gate.CanRead(100), "selection change with old inventory UI still open cannot relabel buffers");
 gate.Observe(200, true); Check(!gate.CanRead(200), "time alone cannot establish buffer ownership");
-gate.Observe(200, false); gate.Observe(200, true); Check(gate.CanRead(200), "observed unload/reload establishes new owner");
+gate.Observe(200, false); gate.Observe(200, true); Check(gate.CanRead(200), "inventory UI close/reopen establishes new owner without container unload");
 gate.Observe(0, true); gate.Observe(300, true);
 Check(!gate.CanRead(300), "cleared selection cannot relabel still-loaded old buffers");
-gate.Observe(300, false); gate.Observe(300, true); Check(gate.CanRead(300), "ownership resumes after real unload");
+gate.Observe(300, false); gate.Observe(300, true); Check(gate.CanRead(300), "ownership resumes after inventory UI reopen");
+gate.Observe(300, false); Check(!gate.CanRead(300), "closed inventory cannot refresh snapshots from still-loaded buffers");
 gate.Reset(); Check(!gate.CanRead(200), "reset removes owner identity");
 NativeContainerTests.Run(Check);
 Console.WriteLine($"{checks}/{checks} checks passed");

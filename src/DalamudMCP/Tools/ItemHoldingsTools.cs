@@ -6,6 +6,7 @@ using Dalamud.Game.Inventory;
 using Dalamud.Plugin.Services;
 using DalamudMCP.Mcp;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 using Newtonsoft.Json.Linq;
 
@@ -91,14 +92,13 @@ internal sealed unsafe class ItemHoldingsTools : IDisposable
     private void OnUpdate(IFramework framework)
     {
         if (!Ready()) return;
-        // Observe ownership every frame so a short unload/reload between two retainers is not missed.
+        // Containers can stay loaded across sessions. Observe the inventory UI lifetime instead.
         try
         {
             var manager = InventoryManager.Instance();
             if (manager == null) return;
             var state = MemoryProbe.TryReadStruct<RetainerManager>((ulong)RetainerManager.Instance(), out _);
-            var first = MemoryProbe.TryReadStruct<InventoryContainer>((ulong)manager->GetInventoryContainer(InventoryType.RetainerPage1), out _);
-            ownership.Observe(state?.LastSelectedRetainerId ?? 0, first?.IsLoaded == true);
+            ownership.Observe(state?.LastSelectedRetainerId ?? 0, IsRetainerInventoryReady());
             if (Environment.TickCount64 < nextSample) return;
             nextSample = Environment.TickCount64 + 1000;
             var snapshot = Capture(false);
@@ -141,24 +141,33 @@ internal sealed unsafe class ItemHoldingsTools : IDisposable
                 if (r.RetainerId == owner) ownerName = r.NameString;
             }
         }
-        var first = manager == null ? null : MemoryProbe.TryReadStruct<InventoryContainer>(
-            (ulong)manager->GetInventoryContainer(InventoryType.RetainerPage1), out _);
-        ownership.Observe(owner, first?.IsLoaded == true);
+        ownership.Observe(owner, IsRetainerInventoryReady());
         var result = new List<HoldingContainer>();
         foreach (var (scope, type) in Containers)
         {
             if (!all && scope is "inventory" or "equipment" or "armoury") continue;
             if (scope == "retainer" && (owner == 0 || ownerName is null)) continue;
             var ownerId = scope == "retainer" ? owner.ToString() : "player";
-            var reason = scope == "retainer" && !ownership.CanRead(owner) ? "retainer owner changed; waiting for observed container unload/reload" : null;
+            var reason = scope == "retainer" && !ownership.CanRead(owner) ? "retainer inventory UI not ready for this owner; open or reopen item management" : null;
             var snapshot = reason is null ? ReadContainer(manager, scope, type, ownerId, ownerName, now)
                 : new HoldingContainer(scope, type.ToString(), ownerId, ownerName, false, reason, now, Array.Empty<HoldingItem>());
             result.Add(snapshot);
         }
         var after = MemoryProbe.TryReadStruct<RetainerManager>((ulong)RetainerManager.Instance(), out _);
-        if (!after.HasValue || after.Value.LastSelectedRetainerId != owner)
+        if (!after.HasValue || after.Value.LastSelectedRetainerId != owner || !IsRetainerInventoryReady())
             result.RemoveAll(c => c.Scope == "retainer");
         return (result, roster, rosterReady);
+    }
+
+    private bool IsRetainerInventoryReady()
+    {
+        foreach (var name in new[] { "InventoryRetainer", "InventoryRetainerLarge" })
+        {
+            var address = svc.GameGui.GetAddonByName(name, 1).Address;
+            var addon = MemoryProbe.TryReadStruct<AtkUnitBase>((ulong)address, out _);
+            if (addon.HasValue && addon.Value.IsVisible && addon.Value.IsReady) return true;
+        }
+        return false;
     }
 
     private HoldingContainer ReadContainer(InventoryManager* manager, string scope, InventoryType type,
