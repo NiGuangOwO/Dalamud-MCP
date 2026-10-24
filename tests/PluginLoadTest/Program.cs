@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 118;
+    private const int ExpectedTools = 119;
 
     private static int checks;
     private static int failures;
@@ -369,6 +369,7 @@ internal static class Program
         if (plugin is null) return 1;
         Check("background combat capture is enabled by default", Equals(Prop(config, "BackgroundCombatRecording"), true));
         Check("background combat watcher subscribes during plugin load", frameworkUpdates.Any(d => d.Method.Name == "Watch" && d.Method.DeclaringType?.Name == "CombatRecorder"));
+        Check("holdings observer subscribes during plugin load", frameworkUpdates.Any(d => d.Method.Name == "OnUpdate" && d.Method.DeclaringType?.Name == "ItemHoldingsTools"));
         var recorderInstance = pluginType.GetField("combatRecorder", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(plugin)!;
         var deadlineField = recorderInstance.GetType().GetField("deadline", BindingFlags.Instance | BindingFlags.NonPublic)!;
         deadlineField.SetValue(recorderInstance, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1);
@@ -400,6 +401,8 @@ internal static class Program
         Check("registry exposes read_memory", toolNames.Contains("read_memory"));
         Check("registry exposes query_events", toolNames.Contains("query_events"));
         Check("registry exposes call_plugin_ipc", toolNames.Contains("call_plugin_ipc"));
+        var holdingsTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "search_item_holdings"));
+        Check("item holdings query is read-only", Equals(Prop(holdingsTool, "Mutating"), false));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
         Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
         var windowTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_game_window_state"));
@@ -478,6 +481,15 @@ internal static class Program
                 JsonSerializer.Serialize(new {jsonrpc="2.0",id=232,method="tools/call",@params=new {
                     name="get_tribal_quest_state",arguments=new {} } })).ConfigureAwait(false);
             Check("tribal state refuses logged-out clients before native access", UnwrapToolResult(tribalOffline).IsError);
+            Set(config, "AllowMutatingTools", false);
+            var holdingsOffline = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new { jsonrpc="2.0", id=236, method="tools/call", @params=new {
+                    name="search_item_holdings", arguments=new { itemId=10 } } })).ConfigureAwait(false);
+            var (holdingsPayload, holdingsError) = UnwrapToolResult(holdingsOffline);
+            using (var state = JsonDocument.Parse(holdingsPayload ?? "{}"))
+                Check("read-only holdings query works with mutation gate closed and reports logged-out state before native access",
+                    !holdingsError && !state.RootElement.GetProperty("available").GetBoolean() && !state.RootElement.GetProperty("complete").GetBoolean());
+            Set(config, "AllowMutatingTools", true);
             using (var addonCatalog = JsonDocument.Parse(listText))
             {
                 var toolsList = addonCatalog.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToArray();

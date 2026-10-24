@@ -47,6 +47,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly AddonProbeTools addonProbe;
     private readonly ScreenshotTools screenshots;
     private readonly CombatRecorder combatRecorder;
+    private readonly ItemHoldingsTools itemHoldings;
     private readonly WindowSystem windowSystem = new("DalamudMCP");
     private readonly ConfigWindow configWindow;
     private readonly EventHub eventHub = new();
@@ -145,6 +146,7 @@ public sealed class Plugin : IDalamudPlugin
         CallbackTools.Register(registry, services);
         ImGuiInputTools.Register(registry, services);
         InventoryTools.Register(registry, services);
+        itemHoldings = new ItemHoldingsTools(registry, services);
         BuddyTools.Register(registry, services);
         ControlTools.Register(registry, services);
         screenshots = new ScreenshotTools(registry, services, textureProvider, textureReadbackProvider);
@@ -369,6 +371,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        itemHoldings.Dispose();
         combatRecorder.Dispose();
         screenshots.Dispose();
         addonProbe.Dispose();

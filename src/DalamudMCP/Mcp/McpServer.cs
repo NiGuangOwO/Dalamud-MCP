@@ -640,6 +640,8 @@ public sealed class McpServer : IDisposable
                         "Read tool schemas and follow tools/list nextCursor before concluding a capability is absent. " +
                         "Discover target-plugin features using list_plugin_commands and open_plugin_ui, then runtime help/UI; " +
                         "do not read target-plugin local source to find test entry points. Read get_tribal_quest_state for tribal quota/reputation. " +
+                        "Use search_item_holdings for bags, equipment, armoury, saddlebags and visited retainers; read coverage/source/complete " +
+                        "because unloaded or unvisited storage is unknown and session snapshots may be stale. " +
                         "Mutating tools are hidden/refused when AllowMutatingTools is off; follow the user's scope and " +
                         "input restrictions. Locate entities with get_game_objects/find_game_object and native windows " +
                         "with list_loaded_addons; use list_addon_elements filters and detail=compact for ordinary lookup, " +

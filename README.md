@@ -278,6 +278,7 @@ Use `set_addon_checkbox` for native checkbox state. See [checkbox behavior and v
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
 | `get_inventory` | The player's carried inventories (the four main bags), each slot with item id, name, quantity and slot index. Results are capped at 200 entries across all containers. | none |
+| `search_item_holdings` | Unified item search across bags/crystals, equipped gear, armoury, normal/premium saddlebags and visited retainers. Reports HQ/NQ totals, locations and live/cached/unavailable coverage. Unvisited storage stays unknown. See [item holdings](docs/item-holdings.md). | exactly one of `itemId`, `name`; optional `contains`, `isHq`, `scopes`, `includeCached`, `offset`, `maxResults` |
 | `get_equipment` | Currently equipped gear, per slot: item id, name, quantity, condition (durability %) and spiritbond/collectability. | none |
 | `get_buddy_list` | Companion buddies: chocobo and pet/trust buddies with entity id, data id, HP/MP and the resolved game object when present. | none |
 | `get_duty_state` | Whether a duty is currently started, plus the content-finder condition (name, id) when one is bound. | none |
