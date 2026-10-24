@@ -37,6 +37,7 @@ internal sealed class AddonElementQuery
     }
 
     internal JArray Elements { get; } = new();
+    internal bool VisibleOnly => visibleOnly;
     internal HashSet<nuint> Visited { get; } = new();
     internal Dictionary<nint, bool?> VisibilityCache { get; } = new();
     internal bool ResultLimit { get; private set; }

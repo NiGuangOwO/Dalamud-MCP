@@ -240,6 +240,24 @@ unsafe class Program
                 Check(dropdownCalls==2,"all rejected dropdown paths invoke no native selector");
             }finally{dropdownAddressValue.SetValue(dropdownAddress,originalDropdownAddress);dropDispatchValue.SetValue(dropDispatchAddress,originalDropDispatch);dropdownButtonValue.SetValue(dropdownButtonAddress,originalDropdownButton);}
             var mapApi=plugin.GetType("DalamudMCP.Tools.MapTools")!;
+            var pruneRoots=new List<nint>();
+            for(var hidden=0;hidden<210;hidden++){
+                var hiddenNode=Allocate(Size(compNodeType));var hiddenControl=Allocate(Size(listType));var hiddenInfo=Allocate(Size(componentInfo));Component(hiddenNode,hiddenControl,hiddenInfo,"List");Marshal.WriteInt32(hiddenNode,Offset(nodeType,"NodeFlags"),0);
+                var hiddenChildren=Allocate(20*8);Marshal.WriteIntPtr(hiddenControl,uldOffset+Offset(uld,"NodeList"),hiddenChildren);Marshal.WriteInt16(hiddenControl,uldOffset+Offset(uld,"NodeListCount"),20);
+                for(var childIndex=0;childIndex<20;childIndex++){var hiddenChild=Allocate(Size(nodeType));Marshal.WriteInt32(hiddenChild,Offset(nodeType,"NodeId"),childIndex+1);Marshal.WriteInt32(hiddenChild,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible")));Marshal.WriteIntPtr(hiddenChildren,childIndex*8,hiddenChild);}
+                pruneRoots.Add(hiddenNode);
+            }
+            var visibleQuery=Query("{\"visibleOnly\":true}",500);var fullHiddenQuery=Query("{}",500);
+            foreach(var hiddenRoot in pruneRoots){foreach(var q in new[]{visibleQuery,fullHiddenQuery}){object?[] wa={Pointer.Box((void*)hiddenRoot,walk.GetParameters()[0].ParameterType),Pointer.Box(null,walk.GetParameters()[1].ParameterType),0,12,false,q,Array.Empty<uint>(),true};walk.Invoke(null,wa);}}
+            var visibleVisited=queryType.GetProperty("Visited",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(visibleQuery)!;
+            Check((int)visibleVisited.GetType().GetProperty("Count")!.GetValue(visibleVisited)! == 210&&Count(visibleQuery)==0&&!(bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(visibleQuery)!,"visible-only traversal prunes 4200 detached hidden children without consuming the 4096-node scan budget");
+            Check((bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(fullHiddenQuery)!&&Count(fullHiddenQuery)>0,"unfiltered hidden-node discovery retains its original traversal and explicit scan limit");
+            var walkAddon=ui.GetMethod("WalkAddon",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var lateUnit=Allocate(Size(unitType));var lateRoots=Allocate(531*8);for(var i=0;i<530;i++)Marshal.WriteIntPtr(lateRoots,i*8,pruneRoots[0]);
+            var lateText=Allocate(Size(textType));var lateBytes=Allocate(512);Marshal.Copy(System.Text.Encoding.UTF8.GetBytes("late root label"),0,lateBytes,15);Marshal.WriteInt16(lateText,Offset(nodeType,"Type"),Convert.ToInt16(Enum.Parse(typeField.FieldType,"Text")));Marshal.WriteInt32(lateText,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible")));Marshal.WriteIntPtr(lateText,textOffset,lateBytes);Marshal.WriteIntPtr(lateRoots,530*8,lateText);
+            Marshal.WriteIntPtr(lateUnit,unitUld+Offset(uld,"NodeList"),lateRoots);Marshal.WriteInt16(lateUnit,unitUld+Offset(uld,"NodeListCount"),531);Marshal.WriteIntPtr(lateUnit,Offset(unitType,"RootNode"),pruneRoots[0]);
+            var lateQuery=Query("{\"visibleOnly\":true,\"label\":\"late root label\"}",10);walkAddon.Invoke(null,new object[]{lateUnit,true,12,false,lateQuery});Check(Count(lateQuery)==1&&!(bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(lateQuery)!,"visible discovery reaches root entry531 without truncating a dynamic addon at512");
+            var unreadableAddonQuery=Query();walkAddon.Invoke(null,new object[]{(nint)1,true,12,false,unreadableAddonQuery});Check((bool)queryType.GetProperty("ScanIncomplete",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(unreadableAddonQuery)!,"unreadable addon discovery remains explicitly incomplete");
             var parameterApi=plugin.GetType("DalamudMCP.Tools.NativeUiEvents")!;var parameterRead=parameterApi.GetMethod("Parameter",BindingFlags.NonPublic|BindingFlags.Static)!;
             var paramNode=Allocate(Size(nodeType));var paramEvent=Allocate(Size(dropEventType));var paramOther=Allocate(Size(dropEventType));
             var paramTypeOffset=Offset(dropEventType,"State")+Offset(dropEventType.GetField("State")!.FieldType,"EventType");

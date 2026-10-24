@@ -181,6 +181,7 @@ internal static class UiTools
             "Filters run before the result limit. truncated/scanIncomplete mean absence or uniqueness " +
             "cannot be established. visible includes addon, parent and component-scope visibility; full detail " +
             "also reports selfVisible. Unreadable/cyclic ancestry returns visible=null and scanIncomplete=true. " +
+            "visibleOnly skips known-hidden component subtrees; root ULD arrays support up to4096 entries within the same4096-node total scan budget. " +
             "Full detail and unfiltered behavior remain the default. Read-only.",
             ElementQuerySchema(),
             args => ListAddonElements(args));
@@ -557,16 +558,7 @@ internal static class UiTools
         // linked child, so the authoritative enumeration is UldManager.NodeList. The list
         // also contains nested nodes, so a visited set keeps the child/sibling descent from
         // emitting the same node twice.
-        var uldNodeCount = Math.Min((int)unit->UldManager.NodeListCount, 512);
-        if (unit->UldManager.NodeListCount > 512) query.ScanIncomplete = true;
-        for (var i = 0; i < uldNodeCount && !query.ResultLimit; i++)
-        {
-            if (!TryNative((nint*)unit->UldManager.NodeList + i, out var address)) { query.ScanIncomplete = true; break; }
-            WalkNode((AtkResNode*)address, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>(), unit->IsVisible);
-        }
-
-        if (!query.ResultLimit)
-            WalkNode(root, unit, 0, maxDepth, allNodes, query, Array.Empty<uint>(), unit->IsVisible);
+        WalkAddon((nint)unit, unit->IsVisible, maxDepth, allNodes, query);
 
         return new JObject
         {
@@ -1180,6 +1172,23 @@ internal static class UiTools
         }
     }
 
+    internal static unsafe void WalkAddon(nint address, bool visible, int maxDepth, bool allNodes, AddonElementQuery query)
+    {
+        var addon = MemoryProbe.TryReadStruct<AtkUnitBase>((ulong)address, out _);
+        if (!addon.HasValue) { query.ScanIncomplete = true; return; }
+        // Dynamic addons can exceed 512 root entries (DDungeon: 531). This
+        // remains inside the existing 4096-node total discovery budget.
+        var count = Math.Min((int)addon.Value.UldManager.NodeListCount, 4096);
+        if (addon.Value.UldManager.NodeListCount > 4096) query.ScanIncomplete = true;
+        for (var i = 0; i < count && !query.ResultLimit; i++)
+        {
+            if (query.Visited.Count >= 4096) { query.ScanIncomplete = true; break; }
+            if (!TryNative((nint*)addon.Value.UldManager.NodeList + i, out var node)) { query.ScanIncomplete = true; break; }
+            WalkNode((AtkResNode*)node, (AtkUnitBase*)address, 0, maxDepth, allNodes, query, Array.Empty<uint>(), visible);
+        }
+        if (!query.ResultLimit) WalkNode(addon.Value.RootNode, (AtkUnitBase*)address, 0, maxDepth, allNodes, query, Array.Empty<uint>(), visible);
+    }
+
     /// <summary>Bounded ULD traversal with filtering and component scope projection.</summary>
     private static unsafe void WalkNode(
         AtkResNode* node,
@@ -1201,6 +1210,10 @@ internal static class UiTools
 
         var visible = NativeUiVisibility.Combine(scopeVisibility, NativeUiVisibility.Read((nint)node, query.VisibilityCache));
         if (visible == null) query.ScanIncomplete = true;
+        // Effective visibility includes owning component scopes. A known-hidden
+        // component cannot contribute a visible descendant, even with detached ULD trees.
+        // Keep unknown ancestry conservative and retain full traversal for other queries.
+        if (query.VisibleOnly && visible == false) return;
 
         var label = NodeLabel(node);
         var clickable = NodeClickable(node);

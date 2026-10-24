@@ -1,4 +1,4 @@
-param([string]$BaseUrl = 'http://127.0.0.1:18777', [string]$Addon = '_ActionBar', [string]$Label = '7')
+param([string]$BaseUrl = 'http://127.0.0.1:18777', [string]$Addon = '_ActionBar', [string]$Label = '7', [switch]$VisibleOnly)
 $ErrorActionPreference = 'Stop'
 $headers = @{ Accept = 'application/json, text/event-stream' }
 $init = @{ jsonrpc='2.0'; id=1; method='initialize'; params=@{
@@ -31,9 +31,13 @@ try {
     if (!(($catalog | Where-Object name -EQ 'list_addon_elements').inputSchema.properties.detail)) {
         throw 'The running build does not expose addon query detail; verify /health.buildMvid.'
     }
-    $full = Call 'list_addon_elements' @{addon=$Addon;allNodes=$true;maxNodes=500;detail='full'}
-    $compact = Call 'list_addon_elements' @{addon=$Addon;allNodes=$true;maxNodes=500;detail='compact'}
-    $filtered = Call 'list_addon_elements' @{addon=$Addon;label=$Label;maxNodes=20;detail='compact'}
+    $fullArguments = @{addon=$Addon;allNodes=$true;maxNodes=500;detail='full'}
+    $compactArguments = @{addon=$Addon;allNodes=$true;maxNodes=500;detail='compact'}
+    $filteredArguments = @{addon=$Addon;label=$Label;maxNodes=20;detail='compact'}
+    if ($VisibleOnly) { foreach ($queryArguments in @($fullArguments,$compactArguments,$filteredArguments)) { $queryArguments.visibleOnly=$true } }
+    $full = Call 'list_addon_elements' $fullArguments
+    $compact = Call 'list_addon_elements' $compactArguments
+    $filtered = Call 'list_addon_elements' $filteredArguments
     $expected = @($full.data.elements | Where-Object {$_.label -and $_.label.Trim().Equals($Label.Trim(),[StringComparison]::OrdinalIgnoreCase)})
     if ($full.data.truncated -or $compact.data.truncated -or $filtered.data.truncated) { throw 'Comparison needs an exhaustive scan; choose a smaller addon.' }
     if ($full.data.returned -ne $compact.data.returned -or $expected.Count -ne $filtered.data.returned -or $expected.Count -eq 0) {

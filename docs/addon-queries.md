@@ -22,7 +22,7 @@
 
 `sample_addon_nodes` 同样支持此路径；`click_addon_when_node_matches` 的 `componentPath` 同时限定观察、目标与点击节点，触发时仍使用同一路径定位。
 
-`returned` 表示本次返回的节点数，`scannedNodes` 表示访问过的唯一原生节点地址数。遍历最多访问 4096 个节点，每个 ULD 数组最多 512 项，组件深度由 `maxDepth` 限制。`scanIncomplete=true` 表示深度、读取或遍历边界使扫描不完整；此时或结果数超限时，`truncated=true`。截断结果不能证明目标不存在或唯一。
+`returned` 表示本次返回的节点数，`scannedNodes` 表示访问过的唯一原生节点地址数。遍历最多访问 4096 个节点，根 ULD 数组最多检查 4096 项，单个组件的 ULD 数组仍最多 512 项；组件深度由 `maxDepth` 限制。`scanIncomplete=true` 表示深度、读取或遍历边界使扫描不完整；此时或结果数超限时，`truncated=true`。截断结果不能证明目标不存在或唯一。
 
 ## 有效可见性
 
@@ -36,14 +36,19 @@
 
 ## 验证
 
+从 1.0.0.23 起，`visibleOnly=true` 在确认组件有效隐藏时不再遍历其独立子树。隐藏父范围下的节点无法满足此筛选，因此不会遗漏有效可见结果；未知可见性仍保守标记扫描不完整。未使用此筛选时继续检查隐藏内容，仍受原有总预算限制。筛选查询完整不代表所有隐藏节点都被扫描过。
+
+同次修复支持动态窗口超过 512 项的根 ULD 列表，且不提高 4096 个唯一节点总预算。便宜迷宫 `DDungeon` 开始后根列表为 531 项：旧版扫描 4096 项后不完整，只返回 7 条；跳过隐藏子树后为 548 项但仍受根列表旧上限影响；完整修复后扫描 651 项，返回 10 条且无截断，恢复楼层与计时文字。离线用 210 个隐藏组件的 4200 个独立子节点复现预算问题，并验证第 531 个根条目可见标签能够被发现。
+
 ```powershell
 dotnet run --project tests/AddonQueryTest -c Release
 dotnet run --project tests/NativeUiReadTest -c Release
 dotnet run --project tests/ProtocolSmokeTest -c Release
 dotnet run --project tests/PluginLoadTest -c Release
 ./tests/AddonQueryTest/LiveComparison.ps1
+./tests/AddonQueryTest/LiveComparison.ps1 -Addon DDungeon -Label '第1层' -VisibleOnly
 ```
 
-`LiveComparison.ps1` 仅调用只读工具，遍历完整工具目录，在同一已打开窗口中比较 full、compact 和标签过滤结果，并将返回路径用于快照读取。默认测试 `_ActionBar` 的标签 `7`，可通过 `-Addon`、`-Label` 调整；窗口扫描不完整、目标缺失或结果不一致时会失败。运行前须将 `/health.buildMvid` 与已测试 DLL 核对。
+`LiveComparison.ps1` 仅调用只读工具，遍历完整工具目录，在同一已打开窗口中比较 full、compact 和标签过滤结果，并将返回路径用于快照读取。默认测试 `_ActionBar` 的标签 `7`，可通过 `-Addon`、`-Label` 调整；`-VisibleOnly` 让三项查询使用同一可见性筛选。窗口扫描不完整、目标缺失或结果不一致时会失败。运行前须将 `/health.buildMvid` 与已测试 DLL 核对。
 
 2026-10-19 初次现场验证：快捷栏 320 节点，full 为 111014 UTF-8 字节，compact 为 72795 字节（减少 34.43%）；标签过滤后为 1 节点、414 字节（减少 99.63%），路径成功用于快照读取。单次 HTTP 批次分别约 33.1、12.3、8.6 毫秒，受现场帧和调度影响，不作性能保证。该测试没有测量模型内部思考时间，也没有执行游戏点击。
