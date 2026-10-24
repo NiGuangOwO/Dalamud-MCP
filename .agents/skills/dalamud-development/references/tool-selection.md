@@ -35,6 +35,8 @@ Use the connected schemas for exact arguments, limits and defaults. This is a ro
 | Is an actual picture needed? | `capture_game_screenshot` with `imageContent=true` returns a native MCP image; default `area=client` copies the game render target, not the desktop. Minimized capture can succeed while rendering continues. Use `includeDalamudUi=false` to exclude plugin overlays. Cached fallback requires `allowCached=true`; inspect `cached`, `ageMs` and `capturedAtUtc`. `save=true,includeImage=false` avoids transmitting pixels. |
 | Must the game's window be minimized/restored? | `set_game_window_state` is a separate mutating-gated action, usable without login. Use only within the task's authorization; verify `observed`. Screenshots never restore/focus the window automatically. |
 
+For automatic click parameters, exact registered zero is valid. Discover the actual event type; missing-type legacy fallback is not proof that the requested event applies. Conflicting exact parameters refuse input. See [native-click-parameters.md](../../../../docs/native-click-parameters.md).
+
 `imgui_*` targets Dear ImGui input/windows; it is not the native Atk addon tree. Use native addon tools for node identity and event contracts. Respect any user prohibition on visual input or computer use; having an input tool does not override it.
 Native node `visible` includes addon, ancestor and component-scope visibility. Full queries and snapshots expose `selfVisible` separately. `visible=null` means ancestry is unreadable/cyclic/over budget; filtered queries exclude it and set `scanIncomplete`. Visibility is not an occlusion or hit-test guarantee.
 

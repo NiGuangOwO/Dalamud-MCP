@@ -240,6 +240,28 @@ unsafe class Program
                 Check(dropdownCalls==2,"all rejected dropdown paths invoke no native selector");
             }finally{dropdownAddressValue.SetValue(dropdownAddress,originalDropdownAddress);dropDispatchValue.SetValue(dropDispatchAddress,originalDropDispatch);dropdownButtonValue.SetValue(dropdownButtonAddress,originalDropdownButton);}
             var mapApi=plugin.GetType("DalamudMCP.Tools.MapTools")!;
+            var parameterApi=plugin.GetType("DalamudMCP.Tools.NativeUiEvents")!;var parameterRead=parameterApi.GetMethod("Parameter",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var paramNode=Allocate(Size(nodeType));var paramEvent=Allocate(Size(dropEventType));var paramOther=Allocate(Size(dropEventType));
+            var paramTypeOffset=Offset(dropEventType,"State")+Offset(dropEventType.GetField("State")!.FieldType,"EventType");
+            var requestedType=Enum.Parse(dropEventType.GetField("State")!.FieldType.GetField("EventType")!.FieldType,"ButtonClick");
+            uint Parameter(nint p)=>(uint)parameterRead.Invoke(null,new[]{(object)p,requestedType})!;
+            Check(Parameter(paramNode)==uint.MaxValue,"unregistered UI event retains historical sentinel fallback");
+            Marshal.WriteIntPtr(paramNode,dropEventOffset,paramEvent);Marshal.WriteByte(paramEvent,paramTypeOffset,Convert.ToByte(requestedType));
+            Check(Parameter(paramNode)==0,"exact registered ButtonClick parameter zero is preserved");
+            Marshal.WriteInt32(paramEvent,Offset(dropEventType,"Param"),123);Check(Parameter(paramNode)==123,"nonzero registered event parameter is preserved");
+            Marshal.WriteInt32(paramEvent,Offset(dropEventType,"Param"),-1);Check(Parameter(paramNode)==uint.MaxValue,"registered unsigned maximum close parameter is preserved");
+            Marshal.WriteByte(paramEvent,paramTypeOffset,0);Marshal.WriteInt32(paramEvent,Offset(dropEventType,"Param"),55);Marshal.WriteIntPtr(paramEvent,Offset(dropEventType,"NextEvent"),paramOther);Marshal.WriteByte(paramOther,paramTypeOffset,Convert.ToByte(requestedType));
+            Check(Parameter(paramNode)==0,"exact zero wins over an earlier unrelated nonzero event");
+            Marshal.WriteByte(paramOther,paramTypeOffset,0);Check(Parameter(paramNode)==55,"missing exact event preserves first nonzero legacy fallback");
+            Marshal.WriteByte(paramEvent,paramTypeOffset,Convert.ToByte(requestedType));Marshal.WriteByte(paramOther,paramTypeOffset,Convert.ToByte(requestedType));
+            Check(DropRefuses(()=>Parameter(paramNode)),"conflicting exact event parameters refuse automatic dispatch");
+            Marshal.WriteInt32(paramOther,Offset(dropEventType,"Param"),55);Check(Parameter(paramNode)==55,"duplicate exact parameter remains unambiguous");
+            Marshal.WriteIntPtr(paramOther,Offset(dropEventType,"NextEvent"),paramEvent);Check(DropRefuses(()=>Parameter(paramNode)),"cyclic automatic event discovery is bounded");Marshal.WriteIntPtr(paramOther,Offset(dropEventType,"NextEvent"),0);
+            Marshal.WriteIntPtr(paramEvent,Offset(dropEventType,"NextEvent"),1);Check(DropRefuses(()=>Parameter(paramNode)),"unreadable event link refuses automatic dispatch");
+            Check(DropRefuses(()=>Parameter(1)),"unreadable UI event node refused before native field access");
+            var eventChain=Enumerable.Range(0,65).Select(_=>Allocate(Size(dropEventType))).ToArray();
+            for(var i=0;i<63;i++)Marshal.WriteIntPtr(eventChain[i],Offset(dropEventType,"NextEvent"),eventChain[i+1]);Marshal.WriteIntPtr(paramNode,dropEventOffset,eventChain[0]);
+            Check(Parameter(paramNode)==uint.MaxValue,"last event within 64-entry discovery budget is accepted");Marshal.WriteIntPtr(eventChain[63],Offset(dropEventType,"NextEvent"),eventChain[64]);Check(DropRefuses(()=>Parameter(paramNode)),"oversized automatic event chain refuses dispatch");
             var rowApi=plugin.GetType("DalamudMCP.Tools.ListRowTools")!;var rowRead=rowApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;var rowActivate=rowApi.GetMethod("ActivateAt",BindingFlags.NonPublic|BindingFlags.Static)!;
             var treeControlType=T("AtkComponentTreeList");var rendererControlType=T("AtkComponentListItemRenderer");
             var rowListNode=Allocate(Size(compNodeType));var rowListControl=Allocate(Size(treeControlType));var rowListInfo=Allocate(Size(componentInfo));

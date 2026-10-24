@@ -253,6 +253,7 @@ Use `get_map_state` to distinguish current/selected maps and page static markers
 Use `get_addon_dropdown`, `set_addon_dropdown_open`, then `select_addon_dropdown_item` for observed native dropdowns; wait for settled open state and verify the actual addon result. See [native dropdowns](docs/native-dropdown.md).
 Use `get_addon_list_row` and `activate_addon_list_row` for guarded List/TreeList renderer activation with actual indices and text. Wait for the business outcome before repeating. See [native list rows](docs/native-list-rows.md).
 Image node snapshots include guarded atlas-part/UV and typed asset metadata. See [image parts](docs/native-image-parts.md).
+Native click parameter discovery preserves exact registered zero and rejects conflicts. See [click parameters](docs/native-click-parameters.md).
 
 ### Client and session
 

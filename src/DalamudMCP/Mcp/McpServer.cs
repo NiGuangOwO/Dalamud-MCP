@@ -652,6 +652,7 @@ public sealed class McpServer : IDisposable
                         "For native dropdowns use get_addon_dropdown, set_addon_dropdown_open, then re-query settled visible state before select_addon_dropdown_item with exact expectedLabel. Verify actual addon behavior separately. " +
                         "For observed List/TreeList renderer rows use get_addon_list_row then activate_addon_list_row with exact index/text guards. Renderer node IDs are not row indices. Wait for the business outcome before repeating non-idempotent activation. " +
                         "Image node snapshots include bounded atlas-part/UV metadata. Part/asset IDs are local, not text; calibrate from current UI and check actual completion instead of guessing scalar state meanings. " +
+                        "For native clicks, exact registered parameter zero is valid; use the observed event type. A legacy fallback for an unregistered type is not a confirmed callback contract. " +
                         "Native node visible includes ancestors/component scopes; selfVisible is only the local flag and null visibility is unknown. " +
                         "Inventory open/close uses its dedicated UI module; inspect open/observed and loaded windows, not the persistent agent's activation. " +
                         "Use open_addon_context_menu for allowed carried-bag DragDrop controls; inspect ContextMenu and get_inventory_context " +

@@ -195,9 +195,10 @@ internal static class UiTools
         registry.Add(
             "click_addon_element",
             "Click an addon (UI window) element",
-            "Dispatches one UI event (default: left click) at a node inside a loaded addon, " +
-            "through the addon's own event pipeline — the same dispatch a real mouse click " +
-            "feeds it. Resolve a nodeId with list_addon_elements first. For list components " +
+            "Dispatches one UI event (default: left click) at a node through the loaded addon's own vtable. " +
+            "Discover the actual event type and node first; component-owned controls may require typed tools. " +
+            "Automatic discovery preserves exact registered parameter zero and refuses conflicting exact parameters. " +
+            "Legacy fallback remains only when the requested event type is absent. For list components " +
             "you may pass 'index' to click a list item directly. CheckBox controls require set_addon_checkbox with an explicit checked state. This is a mutating tool: it " +
             "is hidden from tools/list and refused by tools/call while the plugin's " +
             "allow-mutating-tools switch is off.",
@@ -208,7 +209,7 @@ internal static class UiTools
                 ("componentId", "integer", "Optional top-level component node id. Resolve nodeId only inside this component, avoiding duplicate child ids elsewhere in the addon.", false),
                 ("componentPath", "array of integer", "Exact component path from list_addon_elements, outermost first (0-40 ids). Empty means top-level only. Do not combine with componentId; ambiguous paths are refused. Re-query after addon replacement.", false),
                 ("index", "integer", "For list components: the item index to click instead of a nodeId", false),
-                ("event", "string", "Which event to dispatch: click (default), doubleClick, buttonClick, buttonPress, buttonRelease, or 'registered' to fire every handler the node has registered (closest to a real mouse click)", false),
+                ("event", "string", "Which discovered event to dispatch: click (default), doubleClick, buttonClick, buttonPress, buttonRelease. Advanced 'registered' sends every registered handler; inspect all effects first.", false),
                 ("param", "integer", "Override the event callback param (uint32). Advanced: the game normally derives it from the node's registered handler; ClickLib-style close buttons need 0xFFFFFFFF (-1)", false)),
             args => ClickAddonElement(args),
             mutating: true);
@@ -698,26 +699,7 @@ internal static class UiTools
         }
         else
         {
-            // Pure-managed replacement for node->GetEventParam(eventType): walk the node's
-            // registered events and take the param of the first match for this event type,
-            // falling back to the first non-zero param (close buttons register 0xFFFFFFFF,
-            // which a type-specific probe may not surface).
-            eventParam = 0;
-            for (var e = node->AtkEventManager.Event; e is not null; e = e->NextEvent)
-            {
-                if (e->Param == 0)
-                    continue;
-                if (e->State.EventType == eventType.Value)
-                {
-                    eventParam = e->Param;
-                    break;
-                }
-
-                if (eventParam == 0)
-                    eventParam = e->Param;
-            }
-            if (eventParam == 0)
-                eventParam = 0xFFFFFFFF;
+            eventParam = NativeUiEvents.Parameter((nint)node, eventType.Value);
         }
 
         // For component nodes prefer the component's OwnerNode as the event target and the
