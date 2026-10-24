@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 122;
+    private const int ExpectedTools = 123;
 
     private static int checks;
     private static int failures;
@@ -409,6 +409,8 @@ internal static class Program
         Check("native context-menu opening is classified as mutating", Equals(Prop(contextTool, "Mutating"), true));
         var contextQuery = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "get_inventory_context"));
         Check("inventory context query is read-only", Equals(Prop(contextQuery, "Mutating"), false));
+        var numericTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_numeric_input"));
+        Check("native numeric editing is classified as mutating", Equals(Prop(numericTool, "Mutating"), true));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
         Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
         var windowTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_game_window_state"));
@@ -615,6 +617,12 @@ internal static class Program
                 var (contextPayload, contextError) = UnwrapToolResult(disabledContext);
                 Check("closed mutation gate refuses context-menu requests including dry runs before native access",
                     contextError && contextPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
+                var disabledNumeric = await CallAsync(http, baseUrl, sessionId,
+                    JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 205, method = "tools/call",
+                        @params = new { name = "set_addon_numeric_input", arguments = new { addon = "InputNumeric", nodeId = 3, value = 2, dryRun = true } } })).ConfigureAwait(false);
+                var (numericPayload, numericError) = UnwrapToolResult(disabledNumeric);
+                Check("closed mutation gate refuses numeric editing including dry runs before native access",
+                    numericError && numericPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
             }
             finally { Set(config, "AllowMutatingTools", true); }
             var eventHub = pluginType.GetField("eventHub", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(plugin)!;

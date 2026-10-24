@@ -647,6 +647,7 @@ public sealed class McpServer : IDisposable
                         "with list_loaded_addons; use list_addon_elements filters and detail=compact for ordinary lookup, " +
                         "then copy nodeId/componentPath to clicks or node snapshots. Use set_addon_text_input for native TextInput fields " +
                         "and imgui_text for Dear ImGui; inspect actual text/exactMatch and verify search results separately. " +
+                        "Use set_addon_numeric_input for native NumericInput fields; read live limits and actual value. Numeric edits do not confirm the surrounding dialog. " +
                         "Native node visible includes ancestors/component scopes; selfVisible is only the local flag and null visibility is unknown. " +
                         "Inventory open/close uses its dedicated UI module; inspect open/observed and loaded windows, not the persistent agent's activation. " +
                         "Use open_addon_context_menu for allowed carried-bag DragDrop controls; inspect ContextMenu and get_inventory_context " +

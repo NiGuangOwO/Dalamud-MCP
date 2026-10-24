@@ -138,6 +138,37 @@ unsafe class Program
                 Check(Refused(),"popup belonging to a different addon refused");
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
+            var numberApi=plugin.GetType("DalamudMCP.Tools.NumericInputTools")!;
+            var readNumber=numberApi.GetMethod("TryRead",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var numberType=T("AtkComponentNumericInput");var numberData=numberType.GetField("Data")!.FieldType;
+            var numberNode=Allocate(Size(compNodeType));var numberControl=Allocate(Size(numberType));var numberInfo=Allocate(Size(componentInfo));
+            Marshal.WriteInt16(numberNode,Offset(nodeType,"Type"),1000);
+            Marshal.WriteIntPtr(numberNode,Offset(compNodeType,"Component"),numberControl);
+            Marshal.WriteIntPtr(numberControl,Offset(compType,"OwnerNode"),numberNode);
+            Marshal.WriteIntPtr(numberControl,Offset(numberType,"OwnerAddon"),unit);
+            Marshal.WriteByte(numberControl,uldOffset+Offset(uld,"BaseType"),Convert.ToByte(Enum.Parse(baseType,"Component")));
+            Marshal.WriteIntPtr(numberControl,uldOffset+Offset(uld,"Objects"),numberInfo);
+            Marshal.WriteByte(numberInfo,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"NumericInput")));
+            var minimumOffset=Offset(numberType,"Data")+Offset(numberData,"Min");var maximumOffset=Offset(numberType,"Data")+Offset(numberData,"Max");
+            Marshal.WriteInt32(numberControl,Offset(numberType,"Value"),1);Marshal.WriteInt32(numberControl,minimumOffset,1);Marshal.WriteInt32(numberControl,maximumOffset,65);
+            bool Number(nint p,nint owner,out int v,out int lo,out int hi){object?[] a={p,owner,(nint)0,0,0,0};var ok=(bool)readNumber.Invoke(null,a)!;v=(int)a[3]!;lo=(int)a[4]!;hi=(int)a[5]!;return ok;}
+            Check(Number(numberNode,unit,out var nv,out var nmin,out var nmax)&&nv==1&&nmin==1&&nmax==65,"numeric input reads current value and live SDK limits in one guarded copy");
+            Check(!Number(numberNode,1,out _,out _,out _),"numeric input bound to a different addon refused");
+            Marshal.WriteIntPtr(numberControl,Offset(compType,"OwnerNode"),1);Check(!Number(numberNode,unit,out _,out _,out _),"numeric input with foreign owner node refused");Marshal.WriteIntPtr(numberControl,Offset(compType,"OwnerNode"),numberNode);
+            Marshal.WriteByte(numberInfo,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"TextInput")));Check(!Number(numberNode,unit,out _,out _,out _),"text input cannot be cast to numeric input");Marshal.WriteByte(numberInfo,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"NumericInput")));
+            Marshal.WriteInt32(numberControl,minimumOffset,66);Check(!Number(numberNode,unit,out _,out _,out _),"inverted native numeric limits refused");
+            Marshal.WriteInt32(numberControl,minimumOffset,-10);Marshal.WriteInt32(numberControl,maximumOffset,20);Marshal.WriteInt32(numberControl,Offset(numberType,"Value"),-2);
+            Check(Number(numberNode,unit,out nv,out nmin,out nmax)&&nv==-2&&nmin==-10&&nmax==20,"signed native numeric values remain signed");
+            Marshal.WriteIntPtr(numberNode,Offset(compNodeType,"Component"),1);Check(!Number(numberNode,unit,out _,out _,out _)&&!Number(1,unit,out _,out _,out _),"unreadable numeric component and node are refused");
+            var integer=numberApi.GetMethod("Integer",BindingFlags.NonPublic|BindingFlags.Static)!;
+            int Integer(string input)=>(int)integer.Invoke(null,new object[]{parse.Invoke(null,new[]{input})!,"value"})!;
+            bool BadInteger(string input){try{Integer(input);return false;}catch(TargetInvocationException e){return e.InnerException?.GetType().Name=="ToolException";}}
+            Check(Integer("{\"value\":2147483647}")==int.MaxValue&&Integer("{\"value\":-2147483648}")==int.MinValue,"numeric integer parser accepts exact signed 32-bit boundaries");
+            foreach(var invalid in new[]{"{}","{\"value\":null}","{\"value\":\"2\"}","{\"value\":true}","{\"value\":1.5}","{\"value\":2147483648}","{\"value\":-2147483649}"})Check(BadInteger(invalid),"invalid/coerced numeric value refused: "+invalid);
+            var range=numberApi.GetMethod("CheckRange",BindingFlags.NonPublic|BindingFlags.Static)!;
+            bool Range(int value,int min,int max){try{range.Invoke(null,new object[]{value,min,max});return true;}catch(TargetInvocationException e){if(e.InnerException?.GetType().Name=="ToolException")return false;throw;}}
+            Check(Range(1,1,65)&&Range(65,1,65)&&!Range(0,1,65)&&!Range(66,1,65),"numeric limits are inclusive and refuse out-of-range values without clamping");
+            Check(Range(int.MinValue,int.MinValue,int.MaxValue)&&Range(int.MaxValue,int.MinValue,int.MaxValue)&&!Range(1,2,1),"numeric range guard handles extreme values without arithmetic overflow");
             var contextApi=plugin.GetType("DalamudMCP.Tools.ContextMenuTools")!;
             var dispatchContext=contextApi.GetMethod("DispatchAt",BindingFlags.NonPublic|BindingFlags.Static)!;
             var contextUnit=Allocate(Size(unitType));var contextNode=Allocate(Size(compNodeType));var contextControl=Allocate(Size(T("AtkComponentDragDrop")));var contextInfo=Allocate(Size(componentInfo));
