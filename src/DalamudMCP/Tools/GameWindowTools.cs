@@ -21,7 +21,7 @@ internal static class GameWindowTools
                 if (args["state"]?.Type != JTokenType.String) throw new ToolException("state must be minimize or restore");
                 var state = args.Value<string>("state");
                 if (state is not ("minimize" or "restore")) throw new ToolException("state must be minimize or restore");
-                var hwnd = svc.PluginInterface?.UiBuilder.WindowHandlePtr ?? IntPtr.Zero;
+                var hwnd = WindowHandle(svc);
                 Validate(hwnd);
                 var wantMinimized = state == "minimize";
                 var wasMinimized = IsIconic(hwnd);
@@ -40,6 +40,9 @@ internal static class GameWindowTools
                     ["observed"] = false, ["minimized"] = IsIconic(hwnd) };
             }, mutating: true);
     }
+
+    internal static IntPtr WindowHandle(GameServices svc) =>
+        svc.PluginInterface?.UiBuilder.WindowHandlePtr ?? IntPtr.Zero;
 
     internal static void Validate(IntPtr hwnd)
     {

@@ -11,7 +11,7 @@ plugin development, runtime inspection and in-game validation.
 The plugin runs within the game process and exposes character, object, party, inventory, game-data and UI state
 through Dalamud services and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
 It also provides validated raw-memory reads, event collection, screenshots and inter-plugin communication.
-The current catalog contains **129 tools: 77 read-only and 52 mutating**. Mutating tools require explicit enablement.
+The current catalog contains **131 tools: 77 read-only and 54 mutating**. Mutating tools require explicit enablement.
 
 The default endpoint is `http://127.0.0.1:18777/mcp`. HTTP-capable MCP clients connect directly;
 stdio-only clients use the included bridge.
@@ -238,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## Tool reference
 
-The catalog contains 129 tools: 77 read-only and 52 mutating. The tables summarize the principal tools and parameters.
+The catalog contains 131 tools: 77 read-only and 54 mutating. The tables summarize the principal tools and parameters.
 The server's `tools/list` schemas define the complete catalog and argument constraints.
 Mutating tools are available only when `AllowMutatingTools` is enabled.
 
@@ -249,6 +249,7 @@ Use `set_addon_checkbox` for native checkbox state. See [checkbox behavior and v
 Use `set_addon_text_input` for native text fields; `imgui_text` targets Dear ImGui. See [native text input and live validation](docs/native-text-input.md).
 Use `open_addon_context_menu` for an observed carried-bag DragDrop control and `get_inventory_context` to verify the real target item. See [inventory context menus](docs/inventory-context-menu.md).
 Use `set_addon_numeric_input` for bounded native number edits with actual Min/Max and value readback. It does not confirm a quantity dialog. See [numeric inputs](docs/native-numeric-input.md).
+Use `press_game_key` for one-shot native game keys and `hold_game_key` for bounded continuous movement. See [native game key input](docs/native-key-input.md).
 Use `get_map_state` to distinguish current/selected maps and page static markers; raw marker coordinates must not be used for movement. See [map state](docs/map-state.md).
 Use `get_addon_dropdown`, `set_addon_dropdown_open`, then `select_addon_dropdown_item` for observed native dropdowns; wait for settled open state and verify the actual addon result. See [native dropdowns](docs/native-dropdown.md).
 Use `get_addon_list_row` and `activate_addon_list_row` for guarded List/TreeList renderer activation with actual indices and text. Wait for the business outcome before repeating. See [native list rows](docs/native-list-rows.md).
@@ -405,8 +406,10 @@ Before submission, the tools wait up to two seconds for a draw frame and return 
 | `jump` | Jumps. | none |
 | `toggle_autorun` | Toggles auto-run. | none |
 | `face_target` | Turns the character toward the current target. | none |
+| `press_game_key` | Sends one or more complete taps through FFXIV's native `KeyboardDevice.SendKey` path. Each tap is a key-down/key-up pair; mouse and gamepad keys are refused. The verified game window must be foreground unless `activateWindow` is set. | `key` (required, exact `SeVirtualKey` name), `repeat` (1-8), `intervalFrames` (1-30), `expectedTerritoryId`, `activateWindow`, `dryRun` |
+| `hold_game_key` | Sends a bounded Win32 key-down/hold/key-up sequence for continuous movement. Key-up is attempted in a cleanup path on timeout or failure. | `key` (required), `durationMs` (50-2000, default 250), `expectedTerritoryId`, `activateWindow`, `dryRun` |
 
-All thirteen are mutating and hidden until `AllowMutatingTools` is on. Tools that need a logged-in character
+All fifteen are mutating and hidden until `AllowMutatingTools` is on. Tools that need a logged-in character
 return the standard `{"available": false, "reason": "not logged in"}` otherwise.
 
 ### Movement (mutating)

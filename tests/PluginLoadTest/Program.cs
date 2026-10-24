@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -48,7 +49,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 129;
+    private const int ExpectedTools = 131;
 
     private static int checks;
     private static int failures;
@@ -115,6 +116,13 @@ internal static class Program
         var pluginType = pluginAssembly.GetType("DalamudMCP.Plugin");
         Check("DalamudMCP.Plugin type is present", pluginType is not null);
         if (pluginType is null) return 1;
+
+        var gameKeyInputType = pluginAssembly.GetType("DalamudMCP.Tools.GameKeyInputTools", throwOnError: false);
+        Check("native game key input implementation is present", gameKeyInputType is not null);
+        var nativeInputType = gameKeyInputType?.GetNestedType("NativeInput", BindingFlags.NonPublic);
+        Check("Win32 keyboard INPUT uses the Windows x64 40-byte layout",
+            nativeInputType is not null && Marshal.SizeOf(nativeInputType) == 40,
+            nativeInputType is null ? "NativeInput missing" : $"size {Marshal.SizeOf(nativeInputType)}");
 
         Check("Plugin type is public", pluginType.IsPublic, pluginType.Attributes.ToString());
         Check("Plugin type is sealed and not abstract", pluginType.IsSealed && !pluginType.IsAbstract);
@@ -423,6 +431,10 @@ internal static class Program
         Check("list row activation is classified as mutating", Equals(Prop(rowActivate, "Mutating"), true));
         var numericTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_numeric_input"));
         Check("native numeric editing is classified as mutating", Equals(Prop(numericTool, "Mutating"), true));
+        var gameKeyTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "press_game_key"));
+        Check("native game key input is classified as mutating", Equals(Prop(gameKeyTool, "Mutating"), true));
+        var holdKeyTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "hold_game_key"));
+        Check("native held key input is classified as mutating", Equals(Prop(holdKeyTool, "Mutating"), true));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
         Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
         var windowTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_game_window_state"));
@@ -598,6 +610,12 @@ internal static class Program
             var (wrongTypePayload, wrongTypeError) = UnwrapToolResult(wrongScreenshotType);
             Check("screenshot string boolean cannot silently enable cached frames",
                 wrongTypeError && wrongTypePayload?.Contains("JSON boolean", StringComparison.Ordinal) == true);
+            var invalidGameKey = await CallAsync(http, baseUrl, sessionId,
+                JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 206, method = "tools/call",
+                    @params = new { name = "press_game_key", arguments = new { key = "NOT_A_KEY" } } })).ConfigureAwait(false);
+            var (invalidGameKeyPayload, invalidGameKeyError) = UnwrapToolResult(invalidGameKey);
+            Check("native game key input rejects unknown names before client or native access",
+                invalidGameKeyError && invalidGameKeyPayload?.Contains("unknown native key", StringComparison.Ordinal) == true);
             Set(config, "AllowMutatingTools", false);
             try
             {
@@ -635,6 +653,12 @@ internal static class Program
                 var (numericPayload, numericError) = UnwrapToolResult(disabledNumeric);
                 Check("closed mutation gate refuses numeric editing including dry runs before native access",
                     numericError && numericPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
+                var disabledGameKey = await CallAsync(http, baseUrl, sessionId,
+                    JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 207, method = "tools/call",
+                        @params = new { name = "hold_game_key", arguments = new { key = "W", dryRun = true } } })).ConfigureAwait(false);
+                var (gameKeyPayload, gameKeyError) = UnwrapToolResult(disabledGameKey);
+                Check("closed mutation gate refuses game key input including dry runs before client access",
+                    gameKeyError && gameKeyPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
             }
             finally { Set(config, "AllowMutatingTools", true); }
             var eventHub = pluginType.GetField("eventHub", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(plugin)!;
