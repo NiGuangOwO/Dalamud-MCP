@@ -7,6 +7,7 @@ using DalamudMCP.Mcp;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using LuminaAction = Lumina.Excel.Sheets.Action;
+using LuminaLogMessage = Lumina.Excel.Sheets.LogMessage;
 using Newtonsoft.Json.Linq;
 
 namespace DalamudMCP.Tools;
@@ -170,9 +171,9 @@ internal static unsafe class ControlTools
         if (actionId == 0)
             throw new ToolException("provide actionId or actionName");
 
-        var targetId = SelfTargetId;
-        if (args.TryGetValue("targetObjectId", out var targetTok))
-            targetId = (ulong)targetTok.Value<long>();
+        // Falls back to the current hard target instead of self: with no explicit id, an attack
+        // used to be cast on the player even though a monster was selected, and reported success.
+        var (targetId, targetName, targetSource) = ResolveActionTarget(svc, args);
 
         // Optional guards let a script assert the character is in the state the action expects
         // before anything is cast, instead of firing into the wrong job or zone.
@@ -201,9 +202,14 @@ internal static unsafe class ControlTools
             {
                 ["actionId"] = actionId,
                 ["targetObjectId"] = targetId,
+                ["targetName"] = targetName,
+                ["targetSource"] = targetSource,
                 ["dryRun"] = true,
                 ["status"] = status,
                 ["usable"] = status == 0,
+                ["statusReason"] = status == 0
+                    ? "the action could be used right now"
+                    : ReasonForStatus(status),
                 ["note"] = status == 0
                     ? "the action could be used right now"
                     : "the game reports the action is not currently available (cooldown, range, resource, or target)",
@@ -211,12 +217,21 @@ internal static unsafe class ControlTools
         }
 
         var ok = manager->UseAction(ActionType.Action, actionId, targetId, 0, 0, 0, null);
-        return new JObject
+        var result = new JObject
         {
             ["actionId"] = actionId,
             ["targetObjectId"] = targetId,
+            ["targetName"] = targetName,
+            ["targetSource"] = targetSource,
             ["success"] = ok,
         };
+
+        // UseAction only returns a bool, so a refused cast says nothing about the cause. The
+        // status code is the piece an agent needs to retry intelligently.
+        if (!ok)
+            result.Merge(FailureStatus(svc, ActionType.Action, actionId, targetId));
+
+        return result;
     }
 
     private static JObject UseDutyAction(GameServices svc, JObject args)
@@ -256,12 +271,17 @@ internal static unsafe class ControlTools
 
         var manager = RequireActionManager();
         var ok = manager->UseAction(ActionType.GeneralAction, actionId, SelfTargetId, 0, 0, 0, null);
-        return new JObject
+        var result = new JObject
         {
             ["actionId"] = actionId,
             ["actionType"] = "GeneralAction",
             ["success"] = ok,
         };
+
+        if (!ok)
+            result.Merge(FailureStatus(svc, ActionType.GeneralAction, actionId, SelfTargetId));
+
+        return result;
     }
 
     private static JObject SetTarget(GameServices svc, JObject args, bool focus)
@@ -334,7 +354,14 @@ internal static unsafe class ControlTools
 
         var manager = RequireActionManager();
         var ok = manager->UseAction(ActionType.GeneralAction, generalActionId, SelfTargetId, 0, 0, 0, null);
-        return new JObject { ["success"] = ok };
+        var result = new JObject { ["success"] = ok };
+
+        // Sprint and the other general actions used to report a bare false, which hid whether the
+        // refusal was a cooldown, a range check or a condition the game enforces itself.
+        if (!ok)
+            result.Merge(FailureStatus(svc, ActionType.GeneralAction, generalActionId, SelfTargetId));
+
+        return result;
     }
 
     private static JObject CancelCast(GameServices svc)
@@ -362,6 +389,121 @@ internal static unsafe class ControlTools
             ["name"] = Conv.NullIfEmpty(Conv.Str(target.Name)),
         };
     }
+
+    // ------------------------------------------------------------------
+    // Target resolution and failure reporting
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// The object id an action call should use: the explicit one when supplied, otherwise the
+    /// player's current hard target, otherwise the local player.
+    /// </summary>
+    /// <remarks>
+    /// The previous behaviour always defaulted to self, so an attack aimed at a selected monster
+    /// was cast on the player and still reported success. Reporting the id, name and source lets a
+    /// caller check that the action went where it intended.
+    /// </remarks>
+    private static (ulong TargetId, string? TargetName, string TargetSource) ResolveActionTarget(
+        GameServices svc, JObject args)
+    {
+        if (args.TryGetValue("targetObjectId", out var targetTok))
+        {
+            var explicitId = (ulong)targetTok.Value<long>();
+            var explicitTarget = svc.ObjectTable.SearchById(explicitId);
+            return (
+                explicitId,
+                explicitTarget is null ? null : Conv.NullIfEmpty(Conv.Str(explicitTarget.Name)),
+                "explicit");
+        }
+
+        var self = svc.ObjectTable.LocalPlayer;
+        var current = svc.TargetManager.Target;
+        if (current is not null && (self is null || current.GameObjectId != self.GameObjectId))
+            return (current.GameObjectId, Conv.NullIfEmpty(Conv.Str(current.Name)), "currentTarget");
+
+        return (SelfTargetId, self is null ? null : Conv.NullIfEmpty(Conv.Str(self.Name)), "self");
+    }
+
+    /// <summary>
+    /// Explains why <see cref="ActionManager.UseAction"/> returned false: the numeric status code
+    /// from <see cref="ActionManager.GetActionStatus"/>, the short cause, the localized line the
+    /// game would have shown when it is plain text, and the remaining recast when one is running.
+    /// </summary>
+    private static JObject FailureStatus(GameServices svc, ActionType actionType, uint actionId, ulong targetId)
+    {
+        var manager = RequireActionManager();
+        var status = manager->GetActionStatus(actionType, actionId, targetId, true, true, null);
+
+        var result = new JObject
+        {
+            ["status"] = status,
+            ["reason"] = status == 0
+                ? "the game reported no blocking condition; the call was most likely refused by " +
+                  "animation lock, a queued action, or the current UI state"
+                : ReasonForStatus(status),
+        };
+
+        // The status code is the LogMessage row the game would have shown, so the localized text
+        // is useful context whenever it is a plain line rather than a parameterized template.
+        var message = svc.Sheet<LuminaLogMessage>().GetRowOrDefault(status)?.Text.ExtractText();
+        if (!string.IsNullOrWhiteSpace(message) && !message.Contains('<'))
+            result["gameMessage"] = message;
+
+        if (RecastRemaining(manager, actionType, actionId) is { } remaining)
+            result["remainingSeconds"] = remaining;
+
+        return result;
+    }
+
+    /// <summary>
+    /// Seconds left on the action's recast group, or null when no recast is running.
+    /// </summary>
+    private static double? RecastRemaining(ActionManager* manager, ActionType actionType, uint actionId)
+    {
+        // A missing recast group is reported as -1, and the detail lookup indexes a fixed array of
+        // 80 groups, so the bounds check keeps a bad lookup from reading unrelated memory.
+        var group = manager->GetRecastGroup((int)actionType, actionId);
+        if (group is < 0 or >= 80) return null;
+
+        var detail = manager->GetRecastGroupDetail(group);
+        if (detail == null || !detail->IsActive) return null;
+
+        var remaining = detail->Total - detail->Elapsed;
+        return remaining > 0 ? Conv.Round((float)remaining, 1) : null;
+    }
+
+    /// <summary>
+    /// Short English cause for the status codes the game returns for a refused action. The codes
+    /// are LogMessage row ids, which is why they are not consecutive.
+    /// </summary>
+    private static string ReasonForStatus(uint status) => status switch
+    {
+        562 => "the target is not visible (line of sight)",
+        563 => "the target cannot be selected",
+        564 => "the target is dead",
+        565 => "the target is outside the area of effect",
+        566 => "the target is out of range",
+        567 => "not enough HP",
+        568 => "not enough MP",
+        569 => "not enough TP",
+        570 => "not enough GP",
+        571 => "not enough CP",
+        572 => "the action's use conditions are not met (combo, stance, or state)",
+        573 => "the action has not been learned",
+        574 => "the action cannot be used on the current job",
+        575 => "the action cannot be used in combat",
+        576 => "cannot cast while moving",
+        577 => "the cast was interrupted",
+        578 => "the cast failed",
+        579 => "the current state forbids this action",
+        580 => "cannot use this action while casting",
+        581 => "a status effect prevents this action",
+        582 => "the action is on cooldown or otherwise not available yet",
+        583 => "the required item is missing",
+        592 => "not available during a cutscene",
+        593 => "not available in this location",
+        _ => "the game did not provide a specific reason",
+    };
 
     private static void EnsureLoggedIn(GameServices svc)
     {

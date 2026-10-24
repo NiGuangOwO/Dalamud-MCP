@@ -265,6 +265,7 @@ Native click parameter discovery preserves exact registered zero and rejects con
 | `get_player_attributes` | Character-sheet attributes via `IPlayerState.GetAttribute`, plus base Strength/Dexterity/Vitality/Intelligence/Mind/Piety. Non-zero attributes only. | none |
 | `get_job_levels` | Level, experience and unlocked flag for each class and job, marking which is current. Jobs that are neither unlocked nor levelled are skipped. | none |
 | `get_conditions` | Every `ConditionFlag` currently true, plus explicit booleans for `inCombat`, `mounted`, `crafting`, `gathering`, `betweenAreas`, `watchingCutscene`, `occupiedInEvent` and `boundByDuty`. | none |
+| `get_position` | Cheap navigation read: world x/y/z in yalms, rotation in radians, compass bearing in degrees (clockwise from north), territory id and name, map id, and the `inCombat`/`mounted`/`betweenAreas` flags. Reads only the local player, so it costs far less than `get_local_player`. | `towardGameObjectId` (optional: also report distance in yalms to that object) |
 | `get_currency` | Gil, FC gil, seals, allied seals, wolf marks, gold saucer coins, retainer gil, weekly tomestones, plus named currency-container items (tomestones, scrips, clusters). | none |
 | `get_titles_and_achievements` | Pass `titleId` or `achievementId` to inspect one entry (name, description, points/completion for achievements; name, prefix flag, unlocked for titles). With neither, returns sheet counts, whether the achievement/title lists are loaded, and a hint. | `titleId`, `achievementId` |
 | `get_unlock_state` | Whether a specific thing is unlocked. | `type` (required, 23 values: `mount`, `minion`, `emote`, `orchestrion`, `tripleTriadCard`, `recipe`, `instanceContent`, `action`, `generalAction`, `craftAction`, `trait`, `buddyAction`, `buddyEquip`, `glasses`, `ornament`, `title`, `howTo`, `quest`, `leve`, `achievement`, `aetherCurrent`, `classJob`, `unlockLink`), `id` (required) |
@@ -293,6 +294,13 @@ Native click parameter discovery preserves exact registered zero and rejects con
 | `get_duty_state` | Whether a duty is currently started, plus the content-finder condition (name, id) when one is bound. | none |
 
 Tools that require a loaded character report an unavailable state and reason when the character is absent, for example `{"available": false, "reason": "not logged in"}`.
+
+### Gear and abilities
+
+| Tool | Description | Notable parameters |
+| --- | --- | --- |
+| `get_gearsets` | Every saved gearset with gearset id, slot index, name, class/job (row id, name, abbreviation), item level, glamour plate link, whether it is the active gearset, and the missing-main-hand/missing-gear validity flags. Also reports the entry count, the current gearset index and the current job. | none |
+| `get_cooldowns` | Abilities of the current job that are not ready yet: action id, name, recast group, remaining and total recast seconds, current/maximum charges. Sorted by remaining time, capped at 100 rows, and states explicitly when nothing is on cooldown. The GCD group is excluded, so a job that only just used a weaponskill can legitimately report an empty list. | none |
 
 ### Game data (Excel)
 
@@ -393,7 +401,8 @@ Before submission, the tools wait up to two seconds for a draw frame and return 
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `execute_action` | Casts an action through `ActionManager.UseAction`. Resolve the action by id, or by exact name from the Action sheet. Targets the self target id (`0xE0000000`) unless `targetObjectId` is given. With `dryRun` it only asks the game whether the action could be used right now. Optional job/territory guards refuse the call when the character does not match. | `actionId`, `actionName`, `targetObjectId` (default self), `dryRun`, `requiredClassJobId`, `requiredTerritoryId` |
+| `execute_action` | Casts an action through `ActionManager.UseAction`. Resolve the action by id, or by exact name from the Action sheet. Without `targetObjectId` it targets the current hard target and falls back to the self target id (`0xE0000000`) only when nothing is targeted; the response reports the object used and which rule chose it (`targetName`, `targetSource`). A refused cast carries the game's `status` code plus a plain-language cause instead of a bare `success: false`. With `dryRun` it only asks the game whether the action could be used right now. Optional job/territory guards refuse the call when the character does not match. | `actionId`, `actionName`, `targetObjectId`, `dryRun`, `requiredClassJobId`, `requiredTerritoryId` |
+| `equip_gearset` | Switches class/job by equipping a saved gearset through `RaptureGearsetModule.EquipGearset`, addressed by `gearsetId` or by `name` (exact match first, then a unique case-insensitive substring; ambiguity is refused with the candidate list). Validates the gearset, then polls until the switch is observable and reports the before/after gearset index and job rather than a dispatch. | `gearsetId`, `name` |
 | `use_duty_action` | Fires one of the two duty actions (the extra buttons a duty grants), addressed as slot 1 or 2. Refused when the duty grants none. | `slot` (required: 1 or 2) |
 | `use_general_action` | Fires a general action by id (sprint, jump, auto-run, dismount, accept raise, ...). | `actionId` (required) |
 | `set_target` | Sets the hard target by object id, or by name (exact match first, then contains). | `targetObjectId`, `targetName` |
@@ -409,7 +418,10 @@ Before submission, the tools wait up to two seconds for a draw frame and return 
 | `press_game_key` | Sends one or more complete taps through FFXIV's native `KeyboardDevice.SendKey` path. Each tap is a key-down/key-up pair; mouse and gamepad keys are refused. The verified game window must be foreground unless `activateWindow` is set. | `key` (required, exact `SeVirtualKey` name), `repeat` (1-8), `intervalFrames` (1-30), `expectedTerritoryId`, `activateWindow`, `dryRun` |
 | `hold_game_key` | Sends a bounded Win32 key-down/hold/key-up sequence for continuous movement. Key-up is attempted in a cleanup path on timeout or failure. | `key` (required), `durationMs` (50-2000, default 250), `expectedTerritoryId`, `activateWindow`, `dryRun` |
 
-All fifteen are mutating and hidden until `AllowMutatingTools` is on. Tools that need a logged-in character
+All sixteen are mutating and hidden until `AllowMutatingTools` is on. The general-action tools
+(`use_general_action`, `toggle_sprint`, `jump`, `toggle_autorun`, `dismount`, `accept_raise`) report the
+game's status code and a short cause when one is refused, so a cooldown or a lacking condition is
+distinguishable from a range or line-of-sight problem. Tools that need a logged-in character
 return the standard `{"available": false, "reason": "not logged in"}` otherwise.
 
 ### Movement (mutating)
@@ -422,6 +434,8 @@ Use `get_game_objects` to identify a destination object before requesting moveme
 | --- | --- | --- |
 | `move_to_entity` | Starts auto-movement toward a game object, snapping the destination to the floor mesh first. | `gameObjectId` (required, decimal or `0x` hex), `allowFlight` |
 | `move_to_nearby_targetable_object` | Finds the closest targetable object whose name contains the given text and starts auto-movement toward it. Player characters are skipped unless `includePlayers` is set. | `name` (required), `maxDistance` (default 30), `includePlayers`, `allowFlight` |
+| `move_to_position` | Walks to raw world coordinates. The requested point is snapped onto the navigation mesh first, and the response reports the destination actually used, whether snapping moved it, and whether pathfinding started. | `x`, `y`, `z` (required, yalms), `allowFlight` |
+| `stop_movement` | Cancels the active auto-move. The entry point is discovered rather than assumed: a fixed list of vnavmesh stop candidates is probed and the one that exists is invoked. When none is registered the response says so with the probed names and warns that the walk may continue, instead of claiming it stopped. | none |
 
 ### Travel (mutating)
 
@@ -593,7 +607,9 @@ Offline passes establish the assertions implemented by each suite, not complete 
 Its constructor sweep does not reproduce every runtime dependency or UI state.
 
 The [2026-10-17 audit](docs/tool-audit-2026-10-17.md) records 62 distinct tools observed in a live session,
-including contextual refusals and no-ops. [Screenshot verification](docs/screenshots.md) covers the later render-capture implementation.
+including contextual refusals and no-ops. The [2026-10-24 play-test gap audit](docs/tool-gap-audit-2026-10-24.md)
+records the scenarios where playing the game had no suitable tool, the six tools that closed those gaps, and
+the gaps that were deliberately left open. [Screenshot verification](docs/screenshots.md) covers the later render-capture implementation.
 The [addon and development-loader guide](docs/addon-probes-and-dev-loader.md) documents the relevant UI and loader checks.
 These records describe specific builds and scenarios; test counts are not a compatibility guarantee.
 

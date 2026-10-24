@@ -150,10 +150,13 @@ public sealed class Plugin : IDalamudPlugin
         itemHoldings = new ItemHoldingsTools(registry, services);
         BuddyTools.Register(registry, services);
         ControlTools.Register(registry, services);
+        CooldownTools.Register(registry, services);
+        GearsetTools.Register(registry, services);
         screenshots = new ScreenshotTools(registry, services, textureProvider, textureReadbackProvider);
         GameWindowTools.Register(registry, services);
         TeleportTools.Register(registry, services);
         MovementTools.Register(registry, services);
+        NavTools.Register(registry, services);
         ChatTools.Register(registry, services);
         QuestTools.Register(registry, services);
         PluginManagementTools.Register(registry, services);
