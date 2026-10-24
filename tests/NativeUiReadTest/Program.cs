@@ -13,6 +13,20 @@ unsafe class Program
     static int contextCalls, contextParam, contextEventType, contextButton, contextModifier;
     static nint contextDataNode, contextDataInterface, contextEventNode;
     static int contextButtonOffset, contextModifierOffset, contextNodeOffset, contextInterfaceOffset, eventNodeOffset;
+    static nint dropdownList;
+    static int dropdownSelectedOffset, dropdownCalls, dropdownLastIndex;
+    static bool dropdownDisabled, dropdownIgnore;
+    static int dropdownNotifications, dropdownNotifiedIndex, dropdownNotifiedType;
+    static nint dropdownControl;
+    static int dropdownOpenOffset, dropdownOpenCalls, dropdownOpenParam, dropdownOpenType;
+    static bool dropdownOpenTarget;
+    static nint dropdownOpenEventNode;
+    static int dropdownButtonFlagsOffset;
+    [UnmanagedCallersOnly] static void DropdownCheck(nint control, byte value) { var flags=Marshal.ReadInt32(control,dropdownButtonFlagsOffset);Marshal.WriteInt32(control,dropdownButtonFlagsOffset,value!=0?flags|(1<<18):flags&~(1<<18)); }
+    [UnmanagedCallersOnly] static byte DropdownDisabled(nint list, int index) => dropdownDisabled ? (byte)1 : (byte)0;
+    [UnmanagedCallersOnly] static void DropdownSelect(nint control, int index) { dropdownCalls++; dropdownLastIndex=index; if(!dropdownIgnore)Marshal.WriteInt32(dropdownList,dropdownSelectedOffset,index); }
+    [UnmanagedCallersOnly] static void DropdownNotify(nint list, int index, byte type) { dropdownNotifications++;dropdownNotifiedIndex=index;dropdownNotifiedType=type; }
+    [UnmanagedCallersOnly] static void DropdownOpenReceive(nint listener, byte type, int parameter, nint evt, nint data) { dropdownOpenCalls++;dropdownOpenParam=parameter;dropdownOpenType=type;dropdownOpenEventNode=Marshal.ReadIntPtr(evt);Marshal.WriteByte(dropdownControl,dropdownOpenOffset,dropdownOpenTarget?(byte)1:(byte)0); }
     [UnmanagedCallersOnly] static void ContextEvent(nint listener, byte type, int parameter, nint evt, nint data)
     {
         contextCalls++;contextParam=parameter;contextEventType=type;
@@ -139,6 +153,83 @@ unsafe class Program
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
             var numberApi=plugin.GetType("DalamudMCP.Tools.NumericInputTools")!;
+            var dropdownApi=plugin.GetType("DalamudMCP.Tools.DropdownTools")!;
+            var dropdownRead=dropdownApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var dropdownSelect=dropdownApi.GetMethod("SelectAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var dropdownOpen=dropdownApi.GetMethod("OpenAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var dropdownType=T("AtkComponentDropDownList");var dropNode=Allocate(Size(compNodeType));var dropControl=Allocate(Size(dropdownType));var dropInfo=Allocate(Size(componentInfo));
+            var dropListNode=Allocate(Size(compNodeType));var dropList=Allocate(Size(listType));var dropListInfo=Allocate(Size(componentInfo));
+            void Component(nint n,nint c,nint ci,string k){Marshal.WriteInt16(n,Offset(nodeType,"Type"),1000);Marshal.WriteInt32(n,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));Marshal.WriteIntPtr(n,Offset(compNodeType,"Component"),c);Marshal.WriteIntPtr(c,Offset(compType,"OwnerNode"),n);Marshal.WriteByte(c,uldOffset+Offset(uld,"BaseType"),Convert.ToByte(Enum.Parse(baseType,"Component")));Marshal.WriteIntPtr(c,uldOffset+Offset(uld,"Objects"),ci);Marshal.WriteByte(ci,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,k)));}
+            Component(dropNode,dropControl,dropInfo,"DropDownList");Component(dropListNode,dropList,dropListInfo,"List");
+            Marshal.WriteInt32(dropListNode,Offset(nodeType,"NodeId"),3);Marshal.WriteIntPtr(dropListNode,Offset(nodeType,"ParentNode"),dropNode);
+            Marshal.WriteIntPtr(dropControl,Offset(dropdownType,"List"),dropList);
+            var dropNodes=Allocate(8);Marshal.WriteIntPtr(dropNodes,dropListNode);Marshal.WriteIntPtr(dropControl,uldOffset+Offset(uld,"NodeList"),dropNodes);Marshal.WriteInt16(dropControl,uldOffset+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteInt32(dropList,Offset(listType,"ListLength"),2);Marshal.WriteInt32(dropList,Offset(listType,"SelectedItemIndex"),0);
+            var dropLabels=Allocate(16);var dropLabel0=Allocate(512);var dropLabel1=Allocate(512);Marshal.Copy(System.Text.Encoding.UTF8.GetBytes("lower"),0,dropLabel0,5);Marshal.Copy(System.Text.Encoding.UTF8.GetBytes("upper"),0,dropLabel1,5);
+            Marshal.WriteIntPtr(dropLabels,dropLabel0);Marshal.WriteIntPtr(dropLabels,8,dropLabel1);Marshal.WriteIntPtr(dropList,Offset(listType,"ItemLabels"),dropLabels);
+            var dropTableType=listType.GetNestedType("AtkComponentListVirtualTable")!;var dropTable=Allocate(Size(dropTableType));Marshal.WriteIntPtr(dropList,0,dropTable);
+            Marshal.WriteIntPtr(dropTable,Offset(dropTableType,"GetItemDisabledState"),(nint)(delegate* unmanaged<nint,int,byte>)&DropdownDisabled);
+            dropdownList=dropList;dropdownSelectedOffset=Offset(listType,"SelectedItemIndex");
+            var dropdownAddress=dropdownType.GetNestedType("Addresses")!.GetField("SelectItem")!.GetValue(null)!;var dropdownAddressValue=dropdownAddress.GetType().GetField("Value")!;var originalDropdownAddress=dropdownAddressValue.GetValue(dropdownAddress);
+            var dropDispatchAddress=listType.GetNestedType("Addresses")!.GetField("DispatchItemEvent")!.GetValue(null)!;var dropDispatchValue=dropDispatchAddress.GetType().GetField("Value")!;var originalDropDispatch=dropDispatchValue.GetValue(dropDispatchAddress);
+            var dropEventType=T("AtkEvent");var dropEvent=Allocate(Size(dropEventType));var dropEventManager=nodeType.GetField("AtkEventManager")!.FieldType;
+            var dropEventOffset=Offset(nodeType,"AtkEventManager")+Offset(dropEventManager,"Event");
+            var dropEventKind=Convert.ToByte(Enum.Parse(dropEventType.GetField("State")!.FieldType.GetField("EventType")!.FieldType,"ListItemClick"));
+            Marshal.WriteByte(dropEvent,Offset(dropEventType,"State")+Offset(dropEventType.GetField("State")!.FieldType,"EventType"),dropEventKind);Marshal.WriteIntPtr(dropEvent,Offset(dropEventType,"Listener"),dropControl);Marshal.WriteIntPtr(dropListNode,dropEventOffset,dropEvent);
+            var dropReceiverTableType=T("AtkEventListener").GetNestedType("AtkEventListenerVirtualTable")!;var dropReceiverTable=Allocate(Size(dropReceiverTableType));Marshal.WriteIntPtr(dropReceiverTable,Offset(dropReceiverTableType,"ReceiveEvent"),(nint)(delegate* unmanaged<nint,byte,int,nint,nint,void>)&ContextEvent);Marshal.WriteIntPtr(dropControl,0,dropReceiverTable);
+            var dropCheckNode=Allocate(Size(compNodeType));var dropCheck=Allocate(Size(T("AtkComponentCheckBox")));var dropCheckInfo=Allocate(Size(componentInfo));Component(dropCheckNode,dropCheck,dropCheckInfo,"CheckBox");Marshal.WriteInt32(dropCheckNode,Offset(nodeType,"NodeId"),2);Marshal.WriteIntPtr(dropCheckNode,Offset(nodeType,"ParentNode"),dropNode);Marshal.WriteIntPtr(dropControl,Offset(dropdownType,"Checkbox"),dropCheck);
+            var dropAllNodes=Allocate(16);Marshal.WriteIntPtr(dropAllNodes,dropListNode);Marshal.WriteIntPtr(dropAllNodes,8,dropCheckNode);Marshal.WriteIntPtr(dropControl,uldOffset+Offset(uld,"NodeList"),dropAllNodes);Marshal.WriteInt16(dropControl,uldOffset+Offset(uld,"NodeListCount"),2);
+            var dropCheckEvent=Allocate(Size(dropEventType));var dropCheckEventKind=Convert.ToByte(Enum.Parse(dropEventType.GetField("State")!.FieldType.GetField("EventType")!.FieldType,"ButtonClick"));Marshal.WriteByte(dropCheckEvent,Offset(dropEventType,"State")+Offset(dropEventType.GetField("State")!.FieldType,"EventType"),dropCheckEventKind);Marshal.WriteIntPtr(dropCheckEvent,Offset(dropEventType,"Listener"),dropControl);Marshal.WriteIntPtr(dropCheckNode,dropEventOffset,dropCheckEvent);
+            dropdownControl=dropControl;dropdownOpenOffset=Offset(dropdownType,"IsOpen");Marshal.WriteIntPtr(dropReceiverTable,Offset(dropReceiverTableType,"ReceiveEvent"),(nint)(delegate* unmanaged<nint,byte,int,nint,nint,void>)&DropdownOpenReceive);
+            var dropdownButtonAddress=T("AtkComponentButton").GetNestedType("Addresses")!.GetField("SetChecked")!.GetValue(null)!;var dropdownButtonValue=dropdownButtonAddress.GetType().GetField("Value")!;var originalDropdownButton=dropdownButtonValue.GetValue(dropdownButtonAddress);dropdownButtonFlagsOffset=Offset(T("AtkComponentButton"),"Flags");
+            System.Text.Json.JsonElement DropRead(nint p,int offset=0,int limit=40)=>System.Text.Json.JsonDocument.Parse(dropdownRead.Invoke(null,new object[]{p,offset,limit})!.ToString()!).RootElement.Clone();
+            System.Text.Json.JsonElement DropSelect(int index,string text,int? expected=null,bool dry=false)=>System.Text.Json.JsonDocument.Parse(dropdownSelect.Invoke(null,new object?[]{dropNode,index,text,expected,dry})!.ToString()!).RootElement.Clone();
+            System.Text.Json.JsonElement DropOpen(bool desired,bool? expected=null,bool dry=false){dropdownOpenTarget=desired;return System.Text.Json.JsonDocument.Parse(dropdownOpen.Invoke(null,new object?[]{dropNode,desired,expected,dry})!.ToString()!).RootElement.Clone();}
+            bool DropRefuses(Action action){try{action();return false;}catch(TargetInvocationException e){return e.InnerException?.GetType().Name=="ToolException";}}
+            try{
+                dropdownAddressValue.SetValue(dropdownAddress,(nint)(delegate* unmanaged<nint,int,void>)&DropdownSelect);
+                dropDispatchValue.SetValue(dropDispatchAddress,(nint)(delegate* unmanaged<nint,int,byte,void>)&DropdownNotify);
+                dropdownButtonValue.SetValue(dropdownButtonAddress,(nint)(delegate* unmanaged<nint,byte,void>)&DropdownCheck);
+                var ds=DropRead(dropNode,0,1);Check(ds.GetProperty("optionCount").GetInt32()==2&&ds.GetProperty("nextOffset").GetInt32()==1&&ds.GetProperty("selectedLabel").GetString()=="lower"&&!ds.GetProperty("isOpen").GetBoolean(),"closed native dropdown exposes indexed options without input");
+                Check(DropRead(dropNode,1,1).GetProperty("options")[0].GetProperty("label").GetString()=="upper","dropdown page keeps absolute option index");
+                Check(DropRefuses(()=>DropSelect(1,"upper",0)),"closed dropdown cannot silently change selected text without a real open list");
+                Check(!DropOpen(true,false,true).GetProperty("dispatched").GetBoolean()&&dropdownOpenCalls==0,"dropdown open dry run sends no checkbox event");
+                var os=DropOpen(true,false);Check(os.GetProperty("exactMatch").GetBoolean()&&dropdownOpenCalls==1&&dropdownOpenParam==0&&dropdownOpenType==dropCheckEventKind&&dropdownOpenEventNode==dropCheckNode,"dropdown opens through one owned checkbox notification with native parameter zero");
+                DropOpen(true,true);Check(dropdownOpenCalls==1,"opening an open dropdown sends no duplicate notification");
+                Check(DropRefuses(()=>DropOpen(false,false)),"stale dropdown expectedOpen is refused");
+                Marshal.WriteInt32(dropCheckNode,Offset(nodeType,"NodeFlags"),0);Check(DropRefuses(()=>DropOpen(false,true)),"hidden disabled dropdown checkbox refuses input");Marshal.WriteInt32(dropCheckNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+                dropdownButtonValue.SetValue(dropdownButtonAddress,(nint)1);Check(DropRefuses(()=>DropOpen(false,true)),"non-executable dropdown checkbox setter refused before notification");dropdownButtonValue.SetValue(dropdownButtonAddress,(nint)(delegate* unmanaged<nint,byte,void>)&DropdownCheck);
+                Marshal.WriteIntPtr(dropCheckEvent,Offset(dropEventType,"Listener"),1);Check(DropRefuses(()=>DropOpen(false,true)),"foreign dropdown checkbox listener refused");Marshal.WriteIntPtr(dropCheckEvent,Offset(dropEventType,"Listener"),dropControl);
+                Marshal.WriteIntPtr(dropCheckEvent,Offset(dropEventType,"NextEvent"),dropCheckEvent);Check(DropRefuses(()=>DropOpen(false,true)),"cyclic dropdown checkbox event chain refused");Marshal.WriteIntPtr(dropCheckEvent,Offset(dropEventType,"NextEvent"),0);
+                Marshal.WriteIntPtr(dropCheckNode,Offset(nodeType,"ParentNode"),1);Check(DropRefuses(()=>DropOpen(false,true)),"foreign dropdown checkbox ownership refused");Marshal.WriteIntPtr(dropCheckNode,Offset(nodeType,"ParentNode"),dropNode);
+                Check(DropOpen(false,true).GetProperty("exactMatch").GetBoolean()&&dropdownOpenCalls==2,"dropdown closes through its same typed checkbox path");DropOpen(true,false);
+                Check(DropRefuses(()=>DropRead(1)),"invalid dropdown node refused before reading component");
+                Check(!DropSelect(1,"upper",0,true).GetProperty("dispatched").GetBoolean()&&dropdownCalls==0,"dropdown dry run checks target and disabled accessor without selecting");
+                ds=DropSelect(1,"upper",0);Check(ds.GetProperty("exactMatch").GetBoolean()&&dropdownCalls==1&&dropdownLastIndex==1,"dropdown selection uses actual SDK member pointer and verifies native selected index");
+                Check(ds.GetProperty("notificationDispatched").GetBoolean()&&dropdownNotifications==1&&dropdownNotifiedIndex==1&&dropdownNotifiedType==dropEventKind,"dropdown emits one typed SDK list event for its uniquely registered owner");
+                DropSelect(1,"upper",1);Check(dropdownCalls==1&&dropdownNotifications==1,"identical dropdown selection is idempotent");
+                Check(DropRefuses(()=>DropSelect(0,"wrong",1)),"stale dropdown option label refused");
+                Check(DropRefuses(()=>DropSelect(0,"lower",0)),"stale dropdown selected index refused");
+                Check(DropRefuses(()=>DropSelect(2,"upper",1)),"out-of-range dropdown option refused");
+                Marshal.WriteInt32(dropListNode,Offset(nodeType,"NodeFlags"),0);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"open flag alone cannot authorize input to a hidden disabled dropdown list");Marshal.WriteInt32(dropListNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+                dropdownDisabled=true;Check(DropRefuses(()=>DropSelect(0,"lower",1)),"disabled native dropdown item refused");dropdownDisabled=false;
+                Marshal.WriteByte(dropControl,Offset(dropdownType,"OpenStateChangePending"),1);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"dropdown transition pending refuses another native selection");Marshal.WriteByte(dropControl,Offset(dropdownType,"OpenStateChangePending"),0);
+                dropdownIgnore=true;ds=DropSelect(0,"lower",1);Check(ds.GetProperty("dispatched").GetBoolean()&&!ds.GetProperty("exactMatch").GetBoolean()&&!ds.GetProperty("notificationDispatched").GetBoolean()&&dropdownNotifications==1,"native dropdown dispatch without a state transition is not successful selection or notified");dropdownIgnore=false;
+                dropdownAddressValue.SetValue(dropdownAddress,(nint)1);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"non-executable SDK dropdown selector refused");dropdownAddressValue.SetValue(dropdownAddress,(nint)(delegate* unmanaged<nint,int,void>)&DropdownSelect);
+                dropDispatchValue.SetValue(dropDispatchAddress,(nint)1);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"unresolved dropdown notification refuses selection before mutation");dropDispatchValue.SetValue(dropDispatchAddress,(nint)(delegate* unmanaged<nint,int,byte,void>)&DropdownNotify);
+                Marshal.WriteIntPtr(dropEvent,Offset(dropEventType,"Listener"),1);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"foreign dropdown list listener refused");Marshal.WriteIntPtr(dropEvent,Offset(dropEventType,"Listener"),dropControl);
+                Marshal.WriteIntPtr(dropListNode,dropEventOffset,0);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"missing dropdown list notification refused");Marshal.WriteIntPtr(dropListNode,dropEventOffset,dropEvent);
+                Marshal.WriteIntPtr(dropEvent,Offset(dropEventType,"NextEvent"),dropEvent);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"cyclic dropdown list event chain refused");Marshal.WriteIntPtr(dropEvent,Offset(dropEventType,"NextEvent"),0);
+                Marshal.WriteIntPtr(dropReceiverTable,Offset(dropReceiverTableType,"ReceiveEvent"),1);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"non-executable dropdown listener refused");Marshal.WriteIntPtr(dropReceiverTable,Offset(dropReceiverTableType,"ReceiveEvent"),(nint)(delegate* unmanaged<nint,byte,int,nint,nint,void>)&ContextEvent);
+                Marshal.WriteIntPtr(dropTable,Offset(dropTableType,"GetItemDisabledState"),1);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"non-executable list disabled accessor refused");Marshal.WriteIntPtr(dropTable,Offset(dropTableType,"GetItemDisabledState"),(nint)(delegate* unmanaged<nint,int,byte>)&DropdownDisabled);
+                Marshal.WriteIntPtr(dropLabels,8,1);ds=DropRead(dropNode);Check(ds.GetProperty("scanIncomplete").GetBoolean()&&ds.GetProperty("selectedLabel").ValueKind==System.Text.Json.JsonValueKind.Null,"unreadable dropdown labels remain unknown with incomplete scan");Check(DropRefuses(()=>DropSelect(1,"upper",1)),"unreadable target label cannot match a selection guard");Marshal.WriteIntPtr(dropLabels,8,dropLabel1);
+                Marshal.WriteIntPtr(dropListNode,Offset(nodeType,"ParentNode"),1);Check(DropRefuses(()=>DropRead(dropNode)),"dropdown cannot bind a foreign list owner");Marshal.WriteIntPtr(dropListNode,Offset(nodeType,"ParentNode"),dropNode);
+                Marshal.WriteIntPtr(dropListNode,Offset(compNodeType,"Component"),1);Check(DropRefuses(()=>DropRead(dropNode)),"dropdown inner list component pointer mismatch refused");Marshal.WriteIntPtr(dropListNode,Offset(compNodeType,"Component"),dropList);
+                Marshal.WriteInt32(dropList,Offset(listType,"ListLength"),1025);Check(DropRefuses(()=>DropRead(dropNode)),"dropdown list count bounded before option access");Marshal.WriteInt32(dropList,Offset(listType,"ListLength"),2);
+                Marshal.WriteInt32(dropList,Offset(listType,"SelectedItemIndex"),2);Check(DropRefuses(()=>DropRead(dropNode)),"invalid dropdown selected index refused");Marshal.WriteInt32(dropList,Offset(listType,"SelectedItemIndex"),1);
+                Marshal.WriteInt32(dropNode,Offset(nodeType,"NodeFlags"),0);Check(DropRefuses(()=>DropSelect(0,"lower",1)),"hidden disabled dropdown refused before native selection");
+                Check(dropdownCalls==2,"all rejected dropdown paths invoke no native selector");
+            }finally{dropdownAddressValue.SetValue(dropdownAddress,originalDropdownAddress);dropDispatchValue.SetValue(dropDispatchAddress,originalDropDispatch);dropdownButtonValue.SetValue(dropdownButtonAddress,originalDropdownButton);}
             var mapApi=plugin.GetType("DalamudMCP.Tools.MapTools")!;
             var readMap=mapApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;
             string Map(nint p,int start=0,int limit=40)=>readMap.Invoke(null,new object[]{p,start,limit})!.ToString()!;

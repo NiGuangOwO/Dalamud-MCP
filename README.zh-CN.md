@@ -9,7 +9,7 @@ DalamudMCP 是适用于 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatc
 
 插件运行于游戏进程内部，通过 Dalamud 服务和 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs)
 提供角色、游戏对象、小队、物品栏、游戏数据及界面状态访问，并支持经过校验的原始内存读取、事件采集、截图和插件间通信。
-当前工具目录包含 **124 个工具，其中 75 个只读、49 个可变更**。可变更工具需在配置中显式启用。
+当前工具目录包含 **127 个工具，其中 76 个只读、51 个可变更**。可变更工具需在配置中显式启用。
 
 默认 MCP 地址为 `http://127.0.0.1:18777/mcp`。支持 HTTP 的 MCP 客户端可直接连接；仅支持 stdio 的客户端可使用仓库附带的桥接程序。
 
@@ -227,7 +227,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-当前目录包含 124 个工具：75 个只读、49 个可变更。下表按功能列出主要工具及参数摘要；
+当前目录包含 127 个工具：76 个只读、51 个可变更。下表按功能列出主要工具及参数摘要；
 完整目录和参数约束以服务器返回的 `tools/list` schema 为准，可变更工具在 `AllowMutatingTools` 启用后开放。
 
 `SelectString` 菜单选择使用从零开始的原生选项编号，不使用 `AtkValue` 字段索引。
@@ -238,6 +238,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 随身物品格的右键菜单使用 `open_addon_context_menu`，并通过只读 `get_inventory_context` 核对真实物品；不能从显示格子编号推测底层物品槽位。详见[背包物品菜单说明](docs/inventory-context-menu.md)。
 数字控件使用 `set_addon_numeric_input`，读取动态上下限、校验旧值并返回实际数值，不自动确认数量弹窗。详见[原生数字输入说明](docs/native-numeric-input.md)。
 地图使用只读 `get_map_state` 区分当前/选中地图并分页读取静态图标；原生图标坐标不能直接用于移动。详见[地图状态说明](docs/map-state.md)。
+原生下拉框通过 `get_addon_dropdown`、`set_addon_dropdown_open` 和 `select_addon_dropdown_item` 读取、展开和明确选择；需等待展开完成并核对实际业务结果。详见[原生下拉框说明](docs/native-dropdown.md)。
 
 ### 客户端与会话
 

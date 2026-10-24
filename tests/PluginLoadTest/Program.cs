@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 124;
+    private const int ExpectedTools = 127;
 
     private static int checks;
     private static int failures;
@@ -411,6 +411,12 @@ internal static class Program
         Check("inventory context query is read-only", Equals(Prop(contextQuery, "Mutating"), false));
         var mapQuery = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "get_map_state"));
         Check("map snapshot query is read-only", Equals(Prop(mapQuery, "Mutating"), false));
+        var dropQuery = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "get_addon_dropdown"));
+        Check("dropdown option query is read-only", Equals(Prop(dropQuery, "Mutating"), false));
+        var dropSelect = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "select_addon_dropdown_item"));
+        Check("dropdown selection is classified as mutating", Equals(Prop(dropSelect, "Mutating"), true));
+        var dropOpen = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_dropdown_open"));
+        Check("dropdown open state is classified as mutating", Equals(Prop(dropOpen, "Mutating"), true));
         var numericTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_numeric_input"));
         Check("native numeric editing is classified as mutating", Equals(Prop(numericTool, "Mutating"), true));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
