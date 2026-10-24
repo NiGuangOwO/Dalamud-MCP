@@ -10,6 +10,16 @@ unsafe class Program
     static nint inventoryModule;
     static bool inventoryOpen, ignoreInventoryOpen;
     static int inventoryOpenCalls, inventoryCloseCalls, inventoryType;
+    static int contextCalls, contextParam, contextEventType, contextButton, contextModifier;
+    static nint contextDataNode, contextDataInterface, contextEventNode;
+    static int contextButtonOffset, contextModifierOffset, contextNodeOffset, contextInterfaceOffset, eventNodeOffset;
+    [UnmanagedCallersOnly] static void ContextEvent(nint listener, byte type, int parameter, nint evt, nint data)
+    {
+        contextCalls++;contextParam=parameter;contextEventType=type;
+        contextButton=Marshal.ReadByte(data,contextButtonOffset);contextModifier=Marshal.ReadByte(data,contextModifierOffset);
+        contextDataNode=Marshal.ReadIntPtr(data,contextNodeOffset);contextDataInterface=Marshal.ReadIntPtr(data,contextInterfaceOffset);
+        contextEventNode=Marshal.ReadIntPtr(evt,eventNodeOffset);
+    }
     [UnmanagedCallersOnly] static byte InventoryState(nint module) => module == inventoryModule && inventoryOpen ? (byte)1 : (byte)0;
     [UnmanagedCallersOnly] static void InventoryOpen(nint module, byte type) { if(module!=inventoryModule)return;inventoryOpenCalls++;inventoryType=type;if(!ignoreInventoryOpen)inventoryOpen=true; }
     [UnmanagedCallersOnly] static void InventoryClose(nint module) { if(module!=inventoryModule)return;inventoryCloseCalls++;inventoryOpen=false; }
@@ -128,6 +138,78 @@ unsafe class Program
                 Check(Refused(),"popup belonging to a different addon refused");
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
+            var contextApi=plugin.GetType("DalamudMCP.Tools.ContextMenuTools")!;
+            var dispatchContext=contextApi.GetMethod("DispatchAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var contextUnit=Allocate(Size(unitType));var contextNode=Allocate(Size(compNodeType));var contextControl=Allocate(Size(T("AtkComponentDragDrop")));var contextInfo=Allocate(Size(componentInfo));
+            Marshal.WriteInt16(contextNode,Offset(nodeType,"Type"),1000);
+            Marshal.WriteInt32(contextNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+            Marshal.WriteIntPtr(contextNode,Offset(compNodeType,"Component"),contextControl);
+            Marshal.WriteIntPtr(contextControl,Offset(compType,"OwnerNode"),contextNode);
+            var contextIconNode=Allocate(Size(compNodeType));var contextIcon=Allocate(Size(T("AtkComponentIcon")));var contextChildren=Allocate(8);
+            Marshal.WriteInt16(contextIconNode,Offset(nodeType,"Type"),1000);Marshal.WriteInt32(contextIconNode,Offset(nodeType,"NodeId"),2);
+            Marshal.WriteIntPtr(contextIconNode,Offset(nodeType,"ParentNode"),contextNode);
+            Marshal.WriteIntPtr(contextIconNode,Offset(compNodeType,"Component"),contextIcon);Marshal.WriteIntPtr(contextIcon,Offset(compType,"OwnerNode"),contextIconNode);
+            Marshal.WriteIntPtr(contextControl,Offset(T("AtkComponentDragDrop"),"AtkComponentIcon"),contextIcon);
+            Marshal.WriteIntPtr(contextControl,Offset(T("AtkComponentDragDrop"),"AtkDragDropInterface")+Offset(T("AtkDragDropInterface"),"ComponentNode"),contextIconNode);
+            Marshal.WriteIntPtr(contextChildren,contextIconNode);Marshal.WriteIntPtr(contextControl,uldOffset+Offset(uld,"NodeList"),contextChildren);Marshal.WriteInt16(contextControl,uldOffset+Offset(uld,"NodeListCount"),1);
+            Marshal.WriteByte(contextControl,uldOffset+Offset(uld,"BaseType"),Convert.ToByte(Enum.Parse(baseType,"Component")));
+            Marshal.WriteIntPtr(contextControl,uldOffset+Offset(uld,"Objects"),contextInfo);
+            Marshal.WriteByte(contextInfo,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"DragDrop")));
+            var eventType=T("AtkEvent");var eventManager=nodeType.GetField("AtkEventManager")!.FieldType;
+            var contextNativeEvent=Allocate(Size(eventType));var secondContextEvent=Allocate(Size(eventType));
+            var clickEvent=Convert.ToByte(Enum.Parse(eventType.GetField("State")!.FieldType.GetField("EventType")!.FieldType,"DragDropClick"));
+            var eventTypeOffset=Offset(eventType,"State")+Offset(eventType.GetField("State")!.FieldType,"EventType");
+            foreach(var nativeEvent in new[]{contextNativeEvent,secondContextEvent}){Marshal.WriteByte(nativeEvent,eventTypeOffset,clickEvent);Marshal.WriteIntPtr(nativeEvent,Offset(eventType,"Listener"),contextUnit);}
+            var nodeEventOffset=Offset(nodeType,"AtkEventManager")+Offset(eventManager,"Event");
+            Marshal.WriteIntPtr(contextNode,nodeEventOffset,contextNativeEvent);
+            var listenerType=T("AtkEventListener");var listenerTable=listenerType.GetNestedType("AtkEventListenerVirtualTable")!;
+            var contextTable=Allocate(Size(listenerTable));var receiveSlot=Offset(listenerTable,"ReceiveEvent");
+            var contextCallback=(nint)(delegate* unmanaged<nint,byte,int,nint,nint,void>)&ContextEvent;
+            Marshal.WriteIntPtr(contextUnit,Offset(listenerType,"VirtualTable"),contextTable);Marshal.WriteIntPtr(contextTable,receiveSlot,contextCallback);
+            var dragData=T("AtkEventData").GetNestedType("AtkDragDropData")!;
+            contextButtonOffset=Offset(dragData,"MouseButtonId");contextModifierOffset=Offset(dragData,"MouseModifier");
+            contextNodeOffset=Offset(dragData,"ComponentNode");contextInterfaceOffset=Offset(dragData,"DragDropInterface");eventNodeOffset=Offset(eventType,"Node");
+            void Context(bool dryRun)=>dispatchContext.Invoke(null,new object[]{contextUnit,contextNode,dryRun});
+            bool ContextRefused(){try{Context(false);return false;}catch(TargetInvocationException e){return e.InnerException?.GetType().Name=="ToolException";}}
+            Context(true);Check(contextCalls==0,"context-menu dry run validates but sends no native input");
+            Context(false);
+            Check(contextCalls==1&&contextEventType==clickEvent&&contextParam==0,"one registered DragDropClick is sent and parameter zero is preserved");
+            Check(contextButton==1&&contextModifier==0&&contextDataNode==contextIconNode&&contextDataInterface==contextControl+Offset(T("AtkComponentDragDrop"),"AtkDragDropInterface")&&contextEventNode==contextNode,"right-click payload distinguishes the interface's inner Icon node from the outer registered-event node");
+            Marshal.WriteIntPtr(contextIconNode,Offset(nodeType,"ParentNode"),1);Check(ContextRefused(),"DragDrop interface bound to a foreign inner Icon is refused");Marshal.WriteIntPtr(contextIconNode,Offset(nodeType,"ParentNode"),contextNode);
+            Marshal.WriteIntPtr(contextNativeEvent,Offset(eventType,"Listener"),1);Check(ContextRefused(),"foreign context listener refused");Marshal.WriteIntPtr(contextNativeEvent,Offset(eventType,"Listener"),contextUnit);
+            Marshal.WriteIntPtr(contextNativeEvent,Offset(eventType,"NextEvent"),secondContextEvent);Check(ContextRefused(),"ambiguous DragDropClick notifications refused");
+            Marshal.WriteIntPtr(contextNativeEvent,Offset(eventType,"NextEvent"),contextNativeEvent);Check(ContextRefused(),"cyclic drag/drop event chain refused");Marshal.WriteIntPtr(contextNativeEvent,Offset(eventType,"NextEvent"),0);
+            Marshal.WriteIntPtr(contextNode,nodeEventOffset,0);Check(ContextRefused(),"missing registered context event refused");Marshal.WriteIntPtr(contextNode,nodeEventOffset,contextNativeEvent);
+            Marshal.WriteIntPtr(contextControl,Offset(compType,"OwnerNode"),1);Check(ContextRefused(),"context control with wrong owner refused");Marshal.WriteIntPtr(contextControl,Offset(compType,"OwnerNode"),contextNode);
+            Marshal.WriteByte(contextInfo,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"Button")));Check(ContextRefused(),"ordinary button cannot be cast to a DragDrop control");Marshal.WriteByte(contextInfo,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"DragDrop")));
+            Marshal.WriteInt32(contextNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Enabled")));Check(ContextRefused(),"hidden context control refused");
+            Marshal.WriteInt32(contextNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible")));Check(ContextRefused(),"disabled context control refused");Marshal.WriteInt32(contextNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+            Marshal.WriteIntPtr(contextTable,receiveSlot,1);Check(ContextRefused(),"non-executable context dispatch refused before invocation");
+            Check(contextCalls==1,"refused context paths never invoke native input");
+            var supportsContext=contextApi.GetMethod("Supports",BindingFlags.NonPublic|BindingFlags.Static)!;
+            bool SupportsContext(string name)=>(bool)supportsContext.Invoke(null,new object[]{name})!;
+            Check(SupportsContext("InventoryGrid0")&&!SupportsContext("_ActionBar")&&!SupportsContext("InventoryEventGrid0"),"context input is limited to carried-bag grids, never hotbar or key-item controls");
+            var readContext=contextApi.GetMethod("ReadContextAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var nativeContext=fcs.GetType("FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentInventoryContext")!;
+            var nativeItem=fcs.GetType("FFXIVClientStructs.FFXIV.Client.Game.InventoryItem")!;
+            var contextMemory=Allocate(Size(nativeContext));var contextItem=Allocate(Size(nativeItem));
+            var bagValue=Convert.ToInt32(Enum.Parse(nativeContext.GetField("TargetInventoryId")!.FieldType,"Inventory1"));
+            Marshal.WriteInt32(contextMemory,Offset(nativeContext,"AddonId"),9);
+            Marshal.WriteInt32(contextMemory,Offset(nativeContext,"OwnerAddonId"),111);
+            Marshal.WriteInt32(contextMemory,Offset(nativeContext,"TargetInventoryId"),bagValue);
+            Marshal.WriteInt32(contextMemory,Offset(nativeContext,"TargetInventorySlotId"),4);
+            Marshal.WriteIntPtr(contextMemory,Offset(nativeContext,"TargetInventorySlot"),contextItem);
+            Marshal.WriteInt32(contextItem,Offset(nativeItem,"Container"),bagValue);
+            Marshal.WriteInt16(contextItem,Offset(nativeItem,"Slot"),4);
+            Marshal.WriteInt32(contextItem,Offset(nativeItem,"ItemId"),21800);
+            Marshal.WriteInt32(contextItem,Offset(nativeItem,"Quantity"),205);
+            string ReadContext(nint p,uint menu=9)=>readContext.Invoke(null,new object[]{p,menu})!.ToString()!.Replace(" ","").Replace("\r","").Replace("\n","");
+            Check(ReadContext(contextMemory).Contains("\"available\":true")&&ReadContext(contextMemory).Contains("\"nativeItemId\":21800"),"context query binds the live native item to matching container and slot");
+            Check(ReadContext(contextMemory,10).Contains("\"available\":false"),"context query refuses a different visible menu identity");
+            Marshal.WriteInt16(contextItem,Offset(nativeItem,"Slot"),5);Check(ReadContext(contextMemory).Contains("\"available\":false"),"moved context slot is unavailable rather than a guessed target");Marshal.WriteInt16(contextItem,Offset(nativeItem,"Slot"),4);
+            Marshal.WriteInt32(contextItem,Offset(nativeItem,"Quantity"),0);Check(ReadContext(contextMemory).Contains("\"available\":false"),"empty context item is unavailable");Marshal.WriteInt32(contextItem,Offset(nativeItem,"Quantity"),205);
+            Marshal.WriteIntPtr(contextMemory,Offset(nativeContext,"TargetInventorySlot"),0);Check(ReadContext(contextMemory).Contains("\"available\":false"),"dummy context target is not substituted for a real slot");
+            Marshal.WriteIntPtr(contextMemory,Offset(nativeContext,"TargetInventorySlot"),1);Check(ReadContext(contextMemory).Contains("\"available\":false")&&ReadContext(1).Contains("\"available\":false"),"unreadable context and item pointers return unavailable without native calls");
             var inventoryApi=plugin.GetType("DalamudMCP.Tools.InventoryUiTools")!;
             var readInventory=inventoryApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;
             var setInventory=inventoryApi.GetMethod("SetAt",BindingFlags.NonPublic|BindingFlags.Static)!;

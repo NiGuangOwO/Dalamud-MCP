@@ -187,6 +187,7 @@ internal static class UiTools
 
         CheckboxTools.Register(registry);
         TextInputTools.Register(registry);
+        ContextMenuTools.Register(registry);
         registry.Add(
             "click_addon_element",
             "Click an addon (UI window) element",

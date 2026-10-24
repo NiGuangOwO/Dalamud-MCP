@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 120;
+    private const int ExpectedTools = 122;
 
     private static int checks;
     private static int failures;
@@ -405,6 +405,10 @@ internal static class Program
         Check("item holdings query is read-only", Equals(Prop(holdingsTool, "Mutating"), false));
         var textTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_text_input"));
         Check("native text editing is classified as mutating", Equals(Prop(textTool, "Mutating"), true));
+        var contextTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "open_addon_context_menu"));
+        Check("native context-menu opening is classified as mutating", Equals(Prop(contextTool, "Mutating"), true));
+        var contextQuery = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "get_inventory_context"));
+        Check("inventory context query is read-only", Equals(Prop(contextQuery, "Mutating"), false));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
         Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
         var windowTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_game_window_state"));
@@ -605,6 +609,12 @@ internal static class Program
                 var (textPayload, textError) = UnwrapToolResult(disabledText);
                 Check("closed mutation gate refuses native text edits including dry runs before native access",
                     textError && textPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
+                var disabledContext = await CallAsync(http, baseUrl, sessionId,
+                    JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 204, method = "tools/call",
+                        @params = new { name = "open_addon_context_menu", arguments = new { addon = "InventoryGrid0", nodeId = 7, dryRun = true } } })).ConfigureAwait(false);
+                var (contextPayload, contextError) = UnwrapToolResult(disabledContext);
+                Check("closed mutation gate refuses context-menu requests including dry runs before native access",
+                    contextError && contextPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
             }
             finally { Set(config, "AllowMutatingTools", true); }
             var eventHub = pluginType.GetField("eventHub", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(plugin)!;

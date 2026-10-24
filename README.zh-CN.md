@@ -9,7 +9,7 @@ DalamudMCP 是适用于 FINAL FANTASY XIV 的 [Dalamud](https://github.com/goatc
 
 插件运行于游戏进程内部，通过 Dalamud 服务和 [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs)
 提供角色、游戏对象、小队、物品栏、游戏数据及界面状态访问，并支持经过校验的原始内存读取、事件采集、截图和插件间通信。
-当前工具目录包含 **120 个工具，其中 73 个只读、47 个可变更**。可变更工具需在配置中显式启用。
+当前工具目录包含 **122 个工具，其中 74 个只读、48 个可变更**。可变更工具需在配置中显式启用。
 
 默认 MCP 地址为 `http://127.0.0.1:18777/mcp`。支持 HTTP 的 MCP 客户端可直接连接；仅支持 stdio 的客户端可使用仓库附带的桥接程序。
 
@@ -227,7 +227,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 ## 工具参考
 
-当前目录包含 120 个工具：73 个只读、47 个可变更。下表按功能列出主要工具及参数摘要；
+当前目录包含 122 个工具：74 个只读、48 个可变更。下表按功能列出主要工具及参数摘要；
 完整目录和参数约束以服务器返回的 `tools/list` schema 为准，可变更工具在 `AllowMutatingTools` 启用后开放。
 
 `SelectString` 菜单选择使用从零开始的原生选项编号，不使用 `AtkValue` 字段索引。
@@ -235,6 +235,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 
 原生复选框状态应通过 `set_addon_checkbox` 设置；预检、幂等行为和验证范围见[复选框操作说明](docs/checkboxes.md)。
 原生文本框使用 `set_addon_text_input`，支持中文、预检、旧文本及窗口 ID 校验，并返回实际保留的文本；搜索按钮需另行操作。`imgui_text` 面向 Dear ImGui。详见[原生文本输入及实测记录](docs/native-text-input.md)。
+随身物品格的右键菜单使用 `open_addon_context_menu`，并通过只读 `get_inventory_context` 核对真实物品；不能从显示格子编号推测底层物品槽位。详见[背包物品菜单说明](docs/inventory-context-menu.md)。
 
 ### 客户端与会话
 

@@ -649,6 +649,8 @@ public sealed class McpServer : IDisposable
                         "and imgui_text for Dear ImGui; inspect actual text/exactMatch and verify search results separately. " +
                         "Native node visible includes ancestors/component scopes; selfVisible is only the local flag and null visibility is unknown. " +
                         "Inventory open/close uses its dedicated UI module; inspect open/observed and loaded windows, not the persistent agent's activation. " +
+                        "Use open_addon_context_menu for allowed carried-bag DragDrop controls; inspect ContextMenu and get_inventory_context " +
+                        "and match its actual container/slot with get_inventory before menu actions. UI slot order is not physical inventory order. " +
                         "Use bounded snapshots/sampling for UI investigation. Values are " +
                         "read live; pointers must be re-resolved after object, addon or process lifetime changes. " +
                         "After building another development plugin, load_dev_plugin verifies its running buildMvid " +
