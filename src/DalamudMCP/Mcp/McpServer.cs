@@ -645,7 +645,9 @@ public sealed class McpServer : IDisposable
                         "Mutating tools are hidden/refused when AllowMutatingTools is off; follow the user's scope and " +
                         "input restrictions. Locate entities with get_game_objects/find_game_object and native windows " +
                         "with list_loaded_addons; use list_addon_elements filters and detail=compact for ordinary lookup, " +
-                        "then copy nodeId/componentPath to clicks or node snapshots. Use bounded snapshots/sampling for UI investigation. Values are " +
+                        "then copy nodeId/componentPath to clicks or node snapshots. Use set_addon_text_input for native TextInput fields " +
+                        "and imgui_text for Dear ImGui; inspect actual text/exactMatch and verify search results separately. " +
+                        "Use bounded snapshots/sampling for UI investigation. Values are " +
                         "read live; pointers must be re-resolved after object, addon or process lifetime changes. " +
                         "After building another development plugin, load_dev_plugin verifies its running buildMvid " +
                         "before test commands; the MCP host instead exposes its buildMvid at /health. Verify resulting " +

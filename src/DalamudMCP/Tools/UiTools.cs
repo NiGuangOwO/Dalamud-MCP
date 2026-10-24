@@ -23,8 +23,8 @@ namespace DalamudMCP.Tools;
 /// shortcut: show or hide a system window, or ask which ones are open. The click surface
 /// (click_addon_element) is likewise bounded to dispatching one Atk UI event at a synthetic
 /// position inside a window the agent has already enumerated — the moral equivalent of moving
-/// the mouse and clicking, not a macro engine: nothing here types text or touches combat
-/// state. Crafted AtkValue callback payloads live in <c>CallbackTools</c>, a separate set
+/// the mouse and clicking. TextInputTools provides a separate bounded native text edit;
+/// neither surface touches combat state. Crafted AtkValue callback payloads live in <c>CallbackTools</c>, a separate set
 /// with its own justification.</para>
 ///
 /// <para>The list/click mechanics go one layer below the agent layer, to the game's own UI
@@ -180,6 +180,7 @@ internal static class UiTools
             args => ListAddonElements(args));
 
         CheckboxTools.Register(registry);
+        TextInputTools.Register(registry);
         registry.Add(
             "click_addon_element",
             "Click an addon (UI window) element",

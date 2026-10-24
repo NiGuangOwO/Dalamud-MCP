@@ -122,6 +122,64 @@ unsafe class Program
                 Check(Refused(),"popup belonging to a different addon refused");
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
+            var textApi=plugin.GetType("DalamudMCP.Tools.TextInputTools")!;
+            var readInput=textApi.GetMethod("TryReadInput",BindingFlags.NonPublic|BindingFlags.Static)!;
+            bool ReadInput(nint p,nint owner,out string? value){object?[] a={p,owner,(nint)0,null};var ok=(bool)readInput.Invoke(null,a)!;value=(string?)a[3];return ok;}
+            var textInput=Allocate(Size(T("AtkComponentTextInput")));
+            Marshal.WriteIntPtr(compNode,Offset(compNodeType,"Component"),textInput);
+            Marshal.WriteByte(textInput,uldOffset+Offset(uld,"BaseType"),Convert.ToByte(Enum.Parse(baseType,"Component")));
+            Marshal.WriteIntPtr(textInput,uldOffset+Offset(uld,"Objects"),info);
+            Marshal.WriteIntPtr(textInput,Offset(compType,"OwnerNode"),compNode);
+            Marshal.WriteIntPtr(textInput,Offset(T("AtkComponentTextInput"),"OwnerAddon"),unit);
+            Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"TextInput")));
+            var nativeText=Marshal.StringToCoTaskMemUTF8("枫木");
+            var stringOffset=Offset(T("AtkComponentTextInput"),"EvaluatedString")+Offset(utf,"StringPtr");
+            try
+            {
+                Marshal.WriteIntPtr(textInput,stringOffset,nativeText);
+                Check(ReadInput(compNode,unit,out var value)&&value=="枫木","native TextInput reads actual evaluated Chinese text");
+                Check(!ReadInput(compNode,(nint)1,out _),"text input belonging to another addon refused");
+                Marshal.WriteIntPtr(textInput,Offset(compType,"OwnerNode"),1);
+                Check(!ReadInput(compNode,unit,out _),"text input with mismatched owner node refused");
+                Marshal.WriteIntPtr(textInput,Offset(compType,"OwnerNode"),compNode);
+                Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"NumericInput")));
+                Check(!ReadInput(compNode,unit,out _),"numeric input cannot be cast to TextInput");
+                Marshal.WriteByte(info,Offset(componentInfo,"ComponentType"),Convert.ToByte(Enum.Parse(kind,"TextInput")));
+                Marshal.WriteIntPtr(textInput,stringOffset,1);
+                Check(!ReadInput(compNode,unit,out _),"invalid evaluated string pointer refused before native invocation");
+                Marshal.WriteIntPtr(compNode,Offset(compNodeType,"Component"),1);
+                Check(!ReadInput(compNode,unit,out _),"unreadable text component refused");
+                Check(!ReadInput(1,unit,out _),"unmapped text node refused");
+            }
+            finally{Marshal.FreeCoTaskMem(nativeText);}
+            var usable=textApi.GetMethod("IsUsable",BindingFlags.NonPublic|BindingFlags.Static)!;
+            bool Usable(nint p)=>(bool)usable.Invoke(null,new object[]{p})!;
+            Marshal.WriteIntPtr(compNode,Offset(nodeType,"ParentNode"),0);
+            Check(Usable(compNode),"visible enabled control is usable");
+            Marshal.WriteIntPtr(compNode,Offset(nodeType,"ParentNode"),compNode);
+            Check(!Usable(compNode),"cyclic text input ancestry refused");
+            Marshal.WriteIntPtr(compNode,Offset(nodeType,"ParentNode"),1);
+            Check(!Usable(compNode),"unreadable text input ancestry refused");
+            Marshal.WriteIntPtr(compNode,Offset(nodeType,"ParentNode"),0);
+            Marshal.WriteInt32(compNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible")));
+            Check(!Usable(compNode),"disabled text input refused");
+            Marshal.WriteInt32(compNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+            Check(!Usable(compNode),"hidden text input refused");
+            Marshal.WriteInt32(compNode,Offset(nodeType,"NodeFlags"),Convert.ToInt32(Enum.Parse(flagType,"Visible"))|Convert.ToInt32(Enum.Parse(flagType,"Enabled")));
+            var plain=textApi.GetMethod("PlainText",BindingFlags.NonPublic|BindingFlags.Static)!;
+            object JsonArg(string input)=>parse.Invoke(null,new[]{input})!;
+            string Plain(object a)=>(string)plain.Invoke(null,new object[]{a,"text"})!;
+            bool RejectPlain(object a){try{Plain(a);return false;}catch(TargetInvocationException e){return e.InnerException?.GetType().Name=="ToolException";}}
+            object TextArg(string text){var a=JsonArg("{}");jtype.GetProperty("Item",new[]{typeof(string)})!.SetValue(a,Activator.CreateInstance(json.GetType("Newtonsoft.Json.Linq.JValue")!,new object[]{text}),new object[]{"text"});return a;}
+            Check(Plain(TextArg(""))=="","empty text explicitly clears native input");
+            Check(Plain(TextArg(new string('木',85))).Length==85,"255 UTF8 bytes of Chinese accepted");
+            Check(RejectPlain(TextArg(new string('木',86))),"258 UTF8 bytes of Chinese refused");
+            Check(Plain(TextArg(new string('a',256))).Length==256,"256 ASCII bytes accepted");
+            Check(RejectPlain(TextArg(new string('a',257))),"oversized ASCII text refused");
+            Check(RejectPlain(TextArg("a\0b"))&&RejectPlain(TextArg("a\nb"))&&RejectPlain(TextArg("\u0002")),"NUL newline and SeString control payloads refused");
+            Check(RejectPlain(TextArg("\u2028"))&&RejectPlain(TextArg("\u2029")),"Unicode line and paragraph separators refused");
+            Check(RejectPlain(TextArg("\uD800")),"invalid Unicode surrogate refused");
+            Check(RejectPlain(JsonArg("{\"text\":123}"))&&RejectPlain(JsonArg("{}")),"non-string and missing native text refused");
             var checkboxApi=plugin.GetType("DalamudMCP.Tools.CheckboxTools")!;
             var readCheckbox=checkboxApi.GetMethod("TryReadCheckbox",BindingFlags.NonPublic|BindingFlags.Static)!;
             bool ReadCheckbox(nint pointer,out bool checkedState){object?[] values={pointer,(nint)0,false};var result=(bool)readCheckbox.Invoke(null,values)!;checkedState=(bool)values[2]!;return result;}

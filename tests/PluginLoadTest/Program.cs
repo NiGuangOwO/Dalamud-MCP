@@ -48,7 +48,7 @@ internal static class Program
     /// removed; the count assertions below exist to catch an accidental drop during
     /// registration refactors, not to pin the feature set.
     /// </summary>
-    private const int ExpectedTools = 119;
+    private const int ExpectedTools = 120;
 
     private static int checks;
     private static int failures;
@@ -403,6 +403,8 @@ internal static class Program
         Check("registry exposes call_plugin_ipc", toolNames.Contains("call_plugin_ipc"));
         var holdingsTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "search_item_holdings"));
         Check("item holdings query is read-only", Equals(Prop(holdingsTool, "Mutating"), false));
+        var textTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_addon_text_input"));
+        Check("native text editing is classified as mutating", Equals(Prop(textTool, "Mutating"), true));
         var ipcTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "call_plugin_ipc"));
         Check("IPC invocation is classified as mutating", Equals(Prop(ipcTool, "Mutating"), true));
         var windowTool = tools!.Cast<object>().Single(t => Equals(Prop(t, "Name"), "set_game_window_state"));
@@ -597,6 +599,12 @@ internal static class Program
                 var (windowPayload, windowError) = UnwrapToolResult(disabledWindow);
                 Check("closed mutation gate refuses window changes before touching HWND",
                     windowError && windowPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
+                var disabledText = await CallAsync(http, baseUrl, sessionId,
+                    JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 203, method = "tools/call",
+                        @params = new { name = "set_addon_text_input", arguments = new { addon = "RecipeNote", nodeId = 26, text = "test", dryRun = true } } })).ConfigureAwait(false);
+                var (textPayload, textError) = UnwrapToolResult(disabledText);
+                Check("closed mutation gate refuses native text edits including dry runs before native access",
+                    textError && textPayload?.Contains("changes game state and is disabled", StringComparison.Ordinal) == true);
             }
             finally { Set(config, "AllowMutatingTools", true); }
             var eventHub = pluginType.GetField("eventHub", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(plugin)!;
