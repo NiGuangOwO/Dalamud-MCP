@@ -332,9 +332,9 @@ Original handler addresses for static analysis are available through `get_addon_
 
 | Tool | Description | Notable parameters |
 | --- | --- | --- |
-| `open_addon` | Requests an allowlisted game window through its owning agent's `AgentInterface.Show()`. Unsupported names are rejected. Confirm that the addon and controls are loaded before interacting. | `addon` (required, enum of allowlisted names) |
-| `close_addon` | Closes one of the same allowlisted addon windows through `AgentInterface.Hide()`. Closing a window that is not open is a no-op, not an error. | `addon` (required, enum) |
-| `get_addon_state` | Queries the activity state of allowlisted agents and returns `active` and `inactive` name lists. Read-only. | none |
+| `open_addon` | Requests an allowlisted window through its agent. Inventory uses the dedicated UI-module opener and actual state readback; other agents report dispatch. See [inventory UI](docs/inventory-ui.md). | `addon` (required, enum of allowlisted names) |
+| `close_addon` | Closes an allowlisted window; inventory uses its UI-module closer and verifies immediate state. Repeated inventory close is a no-op. | `addon` (required, enum) |
+| `get_addon_state` | Returns `active`, `inactive` and `unknown`. Inventory uses actual bag-window state; other entries represent agent activity. Read-only. | none |
 | `set_addon_text_input` | Replaces native TextInput text through the SDK, applies native limits, and returns the actual text. Does not submit the form. | `addon`, `nodeId`, `text` (required); `componentPath`, `dryRun`, `expectedText`, `expectedAddonId` |
 | `list_addon_elements` | Searches any loaded addon's nodes before applying the result limit. Use `detail=compact` for ordinary lookup; full detail preserves geometry. Returns exact `componentPath` scopes. See [addon queries](docs/addon-queries.md). | `addon` or `addonId`, `label`, `containsMatch`, `componentType`, `visibleOnly`, `enabledOnly`, `clickableOnly`, `detail`, `allNodes`, `maxDepth` (12), `maxNodes` (100) |
 | `click_addon_element` | Dispatches an Atk UI event through `ReceiveEvent`. Supports `click`, `doubleClick`, `buttonClick`, `buttonPress`, `buttonRelease` and `registered`. Behavior depends on the target node and listener. | `addon` or `addonId`, `nodeId` or `index`, `event`, `param` (advanced override) |

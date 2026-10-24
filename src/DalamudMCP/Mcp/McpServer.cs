@@ -648,6 +648,7 @@ public sealed class McpServer : IDisposable
                         "then copy nodeId/componentPath to clicks or node snapshots. Use set_addon_text_input for native TextInput fields " +
                         "and imgui_text for Dear ImGui; inspect actual text/exactMatch and verify search results separately. " +
                         "Native node visible includes ancestors/component scopes; selfVisible is only the local flag and null visibility is unknown. " +
+                        "Inventory open/close uses its dedicated UI module; inspect open/observed and loaded windows, not the persistent agent's activation. " +
                         "Use bounded snapshots/sampling for UI investigation. Values are " +
                         "read live; pointers must be re-resolved after object, addon or process lifetime changes. " +
                         "After building another development plugin, load_dev_plugin verifies its running buildMvid " +

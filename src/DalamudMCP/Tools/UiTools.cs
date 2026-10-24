@@ -123,7 +123,8 @@ internal static class UiTools
             "Opens one of the game's addon (UI window) surfaces the way its own keyboard shortcut " +
             "would: through the FFXIVClientStructs agent layer (AgentInterface.Show). Bounded to an " +
             "allowlist of standalone-openable system windows; anything that must be opened from a " +
-            "parent context is refused by design. This is a mutating tool: it is hidden from " +
+            "parent context is refused by design. Inventory uses UIModule.OpenInventory and reports its actual " +
+            "immediate open state; other agents still report dispatch only. This is a mutating tool: it is hidden from " +
             "tools/list and refused by tools/call while the plugin's allow-mutating-tools switch " +
             "is off.",
             Json.SchemaWithEnum(
@@ -139,7 +140,8 @@ internal static class UiTools
             "Close an addon (UI window)",
             "Closes one of the game's addon (UI window) surfaces through the agent layer " +
             "(AgentInterface.Hide), the same path the game's own close action takes. Accepts the " +
-            "same allowlist names as open_addon. This is a mutating tool: it is hidden from " +
+            "same allowlist names as open_addon. Inventory uses UIModule.CloseInventory and reads back actual state. " +
+            "This is a mutating tool: it is hidden from " +
             "tools/list and refused by tools/call while the plugin's allow-mutating-tools switch " +
             "is off.",
             Json.SchemaWithEnum(
@@ -154,7 +156,9 @@ internal static class UiTools
             "get_addon_state",
             "Get addon (UI window) state",
             "Reports which of the allowlisted addon surfaces the agent layer currently considers " +
-            "active (its window open), keyed by the same names open_addon accepts. Read-only.",
+            "active, keyed by the same names open_addon accepts. Inventory uses the actual UIModule bag-window " +
+            "state because its persistent agent can remain active with no bag window. Unknown inventory state " +
+            "is listed in unknown, never silently treated as inactive. Read-only.",
             Json.Schema(),
             _ => AddonState());
 
@@ -406,6 +410,8 @@ internal static class UiTools
         if (!OpenableAgents.TryGetValue(addon, out var agentId))
             return Json.ToolError($"unknown addon '{addon}'; see open_addon's enum for the allowlist");
 
+        if (agentId == AgentId.Inventory) return InventoryUiTools.Set(true);
+
         return WithAgent(agentId, addon, agent =>
         {
             agent->Show();
@@ -426,6 +432,8 @@ internal static class UiTools
 
         if (!OpenableAgents.TryGetValue(addon, out var agentId))
             return Json.ToolError($"unknown addon '{addon}'; see close_addon's enum for the allowlist");
+
+        if (agentId == AgentId.Inventory) return InventoryUiTools.Set(false);
 
         return WithAgent(agentId, addon, agent =>
         {
@@ -454,8 +462,15 @@ internal static class UiTools
 
         var active = new JArray();
         var inactive = new JArray();
+        var unknown = new JArray();
         foreach (var (name, agentId) in OpenableAgents.OrderBy(kv => kv.Key, StringComparer.Ordinal))
         {
+            if (agentId == AgentId.Inventory)
+            {
+                try { (InventoryUiTools.IsOpen() ? active : inactive).Add(name); }
+                catch (ToolException) { unknown.Add(name); }
+                continue;
+            }
             var agent = SafeAgent(module, agentId);
             if (agent is null)
             {
@@ -472,6 +487,7 @@ internal static class UiTools
             ["available"] = true,
             ["active"] = active,
             ["inactive"] = inactive,
+            ["unknown"] = unknown,
         };
     }
 

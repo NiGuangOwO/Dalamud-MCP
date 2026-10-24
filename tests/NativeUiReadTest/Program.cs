@@ -7,6 +7,12 @@ unsafe class Program
     [DllImport("kernel32.dll")] static extern nint VirtualAlloc(nint address,nuint size,uint type,uint protect);
     [DllImport("kernel32.dll")] static extern bool VirtualFree(nint address,nuint size,uint type);
     static int checks;
+    static nint inventoryModule;
+    static bool inventoryOpen, ignoreInventoryOpen;
+    static int inventoryOpenCalls, inventoryCloseCalls, inventoryType;
+    [UnmanagedCallersOnly] static byte InventoryState(nint module) => module == inventoryModule && inventoryOpen ? (byte)1 : (byte)0;
+    [UnmanagedCallersOnly] static void InventoryOpen(nint module, byte type) { if(module!=inventoryModule)return;inventoryOpenCalls++;inventoryType=type;if(!ignoreInventoryOpen)inventoryOpen=true; }
+    [UnmanagedCallersOnly] static void InventoryClose(nint module) { if(module!=inventoryModule)return;inventoryCloseCalls++;inventoryOpen=false; }
     static void Check(bool ok,string label){if(!ok)throw new Exception(label);checks++;Console.WriteLine("PASS: "+label);}
     static int Offset(Type t,string field)=>t.GetField(field,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)!.GetCustomAttribute<FieldOffsetAttribute>()!.Value;
     static int Size(Type t)=>t.GetField("StructSize")?.GetRawConstantValue() is int size ? size : Marshal.SizeOf(t);
@@ -122,6 +128,40 @@ unsafe class Program
                 Check(Refused(),"popup belonging to a different addon refused");
             }
             finally{Marshal.FreeCoTaskMem(label0);Marshal.FreeCoTaskMem(label1);}
+            var inventoryApi=plugin.GetType("DalamudMCP.Tools.InventoryUiTools")!;
+            var readInventory=inventoryApi.GetMethod("ReadAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var setInventory=inventoryApi.GetMethod("SetAt",BindingFlags.NonPublic|BindingFlags.Static)!;
+            var uiModule=fcs.GetType("FFXIVClientStructs.FFXIV.Client.UI.UIModuleInterface")!;
+            var uiTable=uiModule.GetNestedType("UIModuleInterfaceVirtualTable")!;
+            var moduleMemory=Allocate(Size(uiModule));var tableMemory=Allocate(Size(uiTable));
+            inventoryModule=moduleMemory;
+            Marshal.WriteIntPtr(moduleMemory,Offset(uiModule,"VirtualTable"),tableMemory);
+            var stateSlot=Offset(uiTable,"IsInventoryOpen");var openSlot=Offset(uiTable,"OpenInventory");var closeSlot=Offset(uiTable,"CloseInventory");
+            Marshal.WriteIntPtr(tableMemory,stateSlot,(nint)(delegate* unmanaged<nint,byte>)&InventoryState);
+            var openCallback=(nint)(delegate* unmanaged<nint,byte,void>)&InventoryOpen;
+            Marshal.WriteIntPtr(tableMemory,openSlot,openCallback);
+            Marshal.WriteIntPtr(tableMemory,closeSlot,(nint)(delegate* unmanaged<nint,void>)&InventoryClose);
+            bool InventoryIsOpen(nint p)=>(bool)readInventory.Invoke(null,new object[]{p})!;
+            object SetInventory(bool open)=>setInventory.Invoke(null,new object[]{moduleMemory,open})!;
+            bool InventoryRefused(nint p,bool? open){try{if(open.HasValue)setInventory.Invoke(null,new object[]{p,open.Value});else readInventory.Invoke(null,new object[]{p});return false;}catch(TargetInvocationException e){return e.InnerException?.GetType().Name=="ToolException";}}
+            Check(!InventoryIsOpen(moduleMemory),"inventory state uses installed SDK slot with an executable isolated stub");
+            SetInventory(true);
+            Check(inventoryOpen&&inventoryOpenCalls==1&&inventoryType==0,"inventory opens through exact SDK method with normal-bag type zero");
+            SetInventory(true);
+            Check(inventoryOpenCalls==1,"opening an already open inventory does not toggle or dispatch again");
+            SetInventory(false);
+            Check(!inventoryOpen&&inventoryCloseCalls==1,"inventory close reads actual resulting state");
+            SetInventory(false);
+            Check(inventoryCloseCalls==1,"closing an already closed inventory is idempotent");
+            ignoreInventoryOpen=true;var noTransition=SetInventory(true).ToString()!.Replace(" ","").Replace("\r","").Replace("\n","");ignoreInventoryOpen=false;
+            Check(noTransition.Contains("\"observed\":false")&&noTransition.Contains("\"opened\":false"),"successful native dispatch without transition is not reported as an opened bag");
+            Marshal.WriteIntPtr(tableMemory,openSlot,1);
+            Check(InventoryRefused(moduleMemory,true),"non-executable inventory opener refused before invocation");
+            Marshal.WriteIntPtr(tableMemory,openSlot,openCallback);
+            Marshal.WriteIntPtr(tableMemory,stateSlot,0);
+            Check(InventoryRefused(moduleMemory,null),"unresolved inventory state function is unknown rather than closed");
+            Marshal.WriteIntPtr(moduleMemory,Offset(uiModule,"VirtualTable"),1);
+            Check(InventoryRefused(moduleMemory,null)&&InventoryRefused(1,null),"unreadable inventory module and vtable refused without native access");
             var visibilityApi=plugin.GetType("DalamudMCP.Tools.NativeUiVisibility")!;
             var readVisibility=visibilityApi.GetMethod("Read",BindingFlags.NonPublic|BindingFlags.Static)!;
             bool? Visible(nint p)=>(bool?)readVisibility.Invoke(null,new object?[]{p,null});
