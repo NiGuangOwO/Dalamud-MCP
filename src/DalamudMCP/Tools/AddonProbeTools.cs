@@ -28,7 +28,7 @@ internal sealed class AddonProbeTools : IDisposable
             ("componentPath", "array of integer", "Exact component path from list_addon_elements, outermost first (0-40 ids). Empty means top-level. Do not combine with componentId.", false),
             ("nodeIds", "array of integer", "Top-level UldManager node ids (1-32 unique ids). Component children are deliberately excluded to avoid ambiguous ids.", true));
         registry.Add("get_addon_node_snapshot", "Read precise addon node state",
-            "Reads local and screen geometry, native transform matrices, origins, parent ids, effective visibility, node addresses, animation timelines and the addon's scalar values together on the framework thread. visible includes addon/parent/component scopes; selfVisible is the node's own flag. Unreadable or cyclic ancestry reports visible=null. No input or memory writes.",
+            "Reads local and screen geometry, native transform matrices, origins, parent ids, effective visibility, node addresses, animation timelines and the addon's scalar values together on the framework thread. Image nodes also report a guarded selected atlas part/UV rectangle and typed asset metadata; partId/assetId are local identifiers, not text or global icon IDs. visible includes addon/parent/component scopes; selfVisible is the node's own flag. Unreadable or cyclic ancestry reports visible=null. No input or memory writes.",
             schema, Read);
         var traceSchema = (JObject)schema.DeepClone();
         ((JObject)traceSchema["properties"]!).Add("frames", new JObject { ["type"] = "integer", ["description"] = "Number of frames to observe, 1-600 (default 180)." });
@@ -127,7 +127,7 @@ internal sealed class AddonProbeTools : IDisposable
             var events = new JArray();
             for (var e = node->AtkEventManager.Event; e != null && events.Count < 32; e = e->NextEvent)
                 events.Add(new JObject { ["type"] = e->State.EventType.ToString(), ["param"] = e->Param, ["listener"] = $"0x{(nuint)e->Listener:X}" });
-            nodes.Add(new JObject
+            var entry = new JObject
             {
                 ["nodeId"] = id, ["available"] = true, ["address"] = $"0x{(nuint)node:X}",
                 ["type"] = node->Type.ToString(), ["x"] = node->X, ["y"] = node->Y,
@@ -152,7 +152,9 @@ internal sealed class AddonProbeTools : IDisposable
                     ["activeLabelId"] = timeline->ActiveLabelId, ["labelEndFrame"] = timeline->LabelEndFrameIdx,
                     ["flags"] = (byte)timeline->Flags,
                 },
-            });
+            };
+            if (node->Type == NodeType.Image) entry["image"] = NativeUiImage.Read((nint)node);
+            nodes.Add(entry);
         }
         var values = new JArray();
         for (var i = 0; i < Math.Min((int)unit->AtkValuesCount, 32); i++)

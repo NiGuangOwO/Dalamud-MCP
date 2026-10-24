@@ -240,6 +240,7 @@ Invoke-RestMethod http://127.0.0.1:18777/tools | ConvertTo-Json -Depth 4
 地图使用只读 `get_map_state` 区分当前/选中地图并分页读取静态图标；原生图标坐标不能直接用于移动。详见[地图状态说明](docs/map-state.md)。
 原生下拉框通过 `get_addon_dropdown`、`set_addon_dropdown_open` 和 `select_addon_dropdown_item` 读取、展开和明确选择；需等待展开完成并核对实际业务结果。详见[原生下拉框说明](docs/native-dropdown.md)。
 List/TreeList 行通过 `get_addon_list_row` 和 `activate_addon_list_row` 读取真实下标并校验文字后激活；需等待业务结果，避免重复操作。详见[原生列表行说明](docs/native-list-rows.md)。
+Image 节点快照提供受保护的图集分片、UV 和资源类型信息，用于区分只含图案的界面。详见[原生图片分片说明](docs/native-image-parts.md)。
 
 ### 客户端与会话
 

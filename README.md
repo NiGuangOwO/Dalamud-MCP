@@ -252,6 +252,7 @@ Use `set_addon_numeric_input` for bounded native number edits with actual Min/Ma
 Use `get_map_state` to distinguish current/selected maps and page static markers; raw marker coordinates must not be used for movement. See [map state](docs/map-state.md).
 Use `get_addon_dropdown`, `set_addon_dropdown_open`, then `select_addon_dropdown_item` for observed native dropdowns; wait for settled open state and verify the actual addon result. See [native dropdowns](docs/native-dropdown.md).
 Use `get_addon_list_row` and `activate_addon_list_row` for guarded List/TreeList renderer activation with actual indices and text. Wait for the business outcome before repeating. See [native list rows](docs/native-list-rows.md).
+Image node snapshots include guarded atlas-part/UV and typed asset metadata. See [image parts](docs/native-image-parts.md).
 
 ### Client and session
 
